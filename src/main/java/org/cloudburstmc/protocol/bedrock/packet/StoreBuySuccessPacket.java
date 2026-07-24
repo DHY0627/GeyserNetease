@@ -3,6 +3,10 @@ package org.cloudburstmc.protocol.bedrock.packet;
 import org.cloudburstmc.protocol.bedrock.annotation.NetEaseOnly;
 import org.cloudburstmc.protocol.common.PacketSignal;
 
+
+/**
+ * Sent by NetEase clients and servers when a store purchase succeeds.
+ */
 @NetEaseOnly
 public class StoreBuySuccessPacket implements BedrockPacket {
 

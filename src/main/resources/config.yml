@@ -1,7 +1,10 @@
 # When set to true, only NetEase clients (RakNet protocol version 8) are allowed to join.
-# Standard Bedrock Edition clients will be rejected with a disconnect message.
+# Standard Bedrock Edition clients will be rejected.
 # When false (default), both NetEase and standard Bedrock clients can connect.
 only-netease-clients: false
+
+# Custom disconnect message shown to international Bedrock players when only-netease-clients is true.
+disconnect-message: "This server only accepts NetEase clients."
 
 # Enable detailed console logging for NetEase authentication and packet handling.
 # Useful for debugging connection issues. Disable in production to reduce log spam.

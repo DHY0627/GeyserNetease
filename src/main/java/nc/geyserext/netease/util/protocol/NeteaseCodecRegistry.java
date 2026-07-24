@@ -10,6 +10,7 @@ import org.cloudburstmc.protocol.bedrock.codec.v630_netease.Bedrock_v630_NetEase
 import org.cloudburstmc.protocol.bedrock.codec.v686_netease.Bedrock_v686_NetEase;
 import org.cloudburstmc.protocol.bedrock.codec.v766_netease.Bedrock_v766_NetEase;
 import org.cloudburstmc.protocol.bedrock.codec.v819_netease.Bedrock_v819_NetEase;
+import org.cloudburstmc.protocol.bedrock.codec.v860_netease.Bedrock_v860_NetEase;
 import org.cloudburstmc.protocol.bedrock.data.EncodingSettings;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -23,6 +24,7 @@ public final class NeteaseCodecRegistry {
         register(Bedrock_v686_NetEase.CODEC);
         register(Bedrock_v766_NetEase.CODEC);
         register(Bedrock_v819_NetEase.CODEC);
+        register(Bedrock_v860_NetEase.CODEC);
     }
 
     private static void register(BedrockCodec c) {

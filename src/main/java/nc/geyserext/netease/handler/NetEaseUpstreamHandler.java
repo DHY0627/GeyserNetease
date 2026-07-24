@@ -84,11 +84,23 @@ public class NetEaseUpstreamHandler extends UpstreamHandlerBase {
                 ChainValidationResult result = NetEaseEncryptionUtils.validateChain(chain);
                 var extra = result.identityClaims().extraData;
                 String name = extra.displayName != null ? extra.displayName : "NetEasePlayer";
-                String id = extra.identity != null ? extra.identity.toString() : UUID.randomUUID().toString();
-                String x = extra.xuid != null ? extra.xuid : "0";
                 Long iat = (Long) result.rawIdentityClaims().get("iat");
 
-                session.setAuthData(new AuthData(name, UUID.fromString(id), x, iat != null ? iat : -1, extra.minecraftId != null ? extra.minecraftId : ""));
+                long neteaseUid = 0;
+                Object red = result.rawIdentityClaims().get("extraData");
+                if (red instanceof Map) {
+                    Object u = ((Map<?, ?>) red).get("uid");
+                    if (u instanceof Number) neteaseUid = ((Number) u).longValue();
+                }
+                if (neteaseUid == 0) neteaseUid = Math.abs(name.hashCode());
+                neteaseSession.setUid(neteaseUid);
+
+                String rawId = extra.identity != null ? extra.identity.toString() : null;
+                UUID javaUuid = toStableUUID(rawId, neteaseUid);
+
+                String xuid = String.valueOf(neteaseUid);
+
+                session.setAuthData(new AuthData(name, javaUuid, xuid, iat != null ? iat : -1, extra.minecraftId != null ? extra.minecraftId : ""));
                 session.setCertChainData(chain.getChain());
 
                 if (packet.getClientJwt() != null && !packet.getClientJwt().isEmpty()) {
@@ -98,11 +110,7 @@ public class NetEaseUpstreamHandler extends UpstreamHandlerBase {
                     } catch (Exception ignored) {}
                 }
                 if (session.getClientData() == null)
-                    session.setClientData(GeyserImpl.GSON.fromJson("{\"GameVersion\":\"1.21.40\",\"LanguageCode\":\"en_us\",\"DeviceOS\":1,\"DeviceModel\":\"NetEase\",\"ThirdPartyName\":\"" + name + "\"}", BedrockClientData.class));
-
-                Object red = result.rawIdentityClaims().get("extraData");
-                if (red instanceof Map) { Object u = ((Map<?,?>)red).get("uid"); if (u instanceof Number) neteaseSession.setUid(((Number)u).longValue()); }
-                if (neteaseSession.uid() == 0) neteaseSession.setUid(Math.abs(name.hashCode()));
+                    session.setClientData(buildFakeClientData(name));
 
                 startEncryptionHandshake(session, result.identityClaims().parsedIdentityPublicKey());
                 if (session.isClosed()) { session.forciblyCloseUpstream(); return PacketSignal.HANDLED; }
@@ -128,15 +136,18 @@ public class NetEaseUpstreamHandler extends UpstreamHandlerBase {
         boolean[] hValid = new boolean[maxId + 1];
         for (int i = 0; i <= maxId; i++) {
             var block = blockMappings.getDefinition(i);
-            if (block instanceof org.geysermc.geyser.registry.type.GeyserBedrockBlock gb && gb.getState() != null) {
-                rtToHash[i] = nc.geyserext.netease.util.BlockHashUtils.fnv1a32Nbt(gb.getState());
-                hValid[i] = true;
+            if (block != null) {
+                var gb = (org.geysermc.geyser.registry.type.GeyserBedrockBlock) block;
+                if (gb.getState() != null) {
+                    rtToHash[i] = nc.geyserext.netease.util.BlockHashUtils.fnv1a32Nbt(gb.getState());
+                    hValid[i] = true;
+                }
             }
         }
 
         try {
             var spoofed = new nc.geyserext.netease.session.SpoofedUpstream(
-                session.getUpstream(), session.getUpstream().getSession(), rtToHash, hValid, patched);
+                session.getUpstream(), session.getUpstream().getSession(), rtToHash, hValid, patched, neteaseSession.uid());
             java.lang.reflect.Field upF = org.geysermc.geyser.session.GeyserSession.class.getDeclaredField("upstream");
             upF.setAccessible(true); upF.set(session, spoofed);
         } catch (Exception e) { NeteaseExtension.LOG.error("SpoofedUpstream inject failed: " + e.getMessage()); }
@@ -153,20 +164,6 @@ public class NetEaseUpstreamHandler extends UpstreamHandlerBase {
 
     @Override
     public PacketSignal handle(PlayerAuthInputPacket packet) {
-        if (neteaseSession != null && session.isSpawned() && !session.isClosed()) {
-            try {
-                var pos = packet.getPosition();
-                float footY = pos.getY() - 1.62f;
-                float dy = packet.getDelta().getY();
-                int blockBelow = session.getGeyser().getWorldManager()
-                    .getBlockAt(session, (int) Math.floor(pos.getX()), (int) Math.floor(footY - 0.01), (int) Math.floor(pos.getZ()));
-                if (blockBelow != 0 && dy <= 0.01f) {
-                    packet.getInputData().add(org.cloudburstmc.protocol.bedrock.data.PlayerAuthInputData.VERTICAL_COLLISION);
-                    session.getPlayerEntity().setLastTickEndVelocity(
-                        org.cloudburstmc.math.vector.Vector3f.from(packet.getDelta().getX(), -0.01f, packet.getDelta().getZ()));
-                }
-            } catch (Exception ignored) {}
-        }
         return defaultHandler(packet);
     }
 
@@ -280,4 +277,32 @@ public class NetEaseUpstreamHandler extends UpstreamHandlerBase {
     }
 
     public NeteaseSession neteaseSession() { return neteaseSession; }
+
+    private static BedrockClientData buildFakeClientData(String name) {
+        return GeyserImpl.GSON.fromJson(
+            "{\"GameVersion\":\"1.21.40\",\"LanguageCode\":\"en_us\",\"DeviceOS\":1," +
+            "\"DeviceModel\":\"NetEase\",\"ThirdPartyName\":\"" + name + "\"," +
+            "\"SkinId\":\"\",\"SkinData\":\"\",\"SkinImageWidth\":64,\"SkinImageHeight\":64," +
+            "\"CapeId\":\"\",\"CapeData\":\"\",\"CapeImageWidth\":64,\"CapeImageHeight\":32," +
+            "\"SkinGeometryData\":\"\",\"SkinResourcePatch\":\"\"," +
+            "\"SkinGeometryDataEngineVersion\":\"\",\"PlayFabId\":\"\"," +
+            "\"PersonaSkin\":false,\"PremiumSkin\":false,\"IsEditorMode\":false," +
+            "\"SkinColor\":\"#0\",\"ArmSize\":\"wide\",\"PersonaPieces\":[],\"PieceTintColors\":[]}",
+            BedrockClientData.class);
+    }
+
+    private static UUID toStableUUID(String rawIdentity, long neteaseUid) {
+        if (rawIdentity != null && !rawIdentity.isEmpty()) {
+            String hex = rawIdentity.replace("-", "");
+            if (hex.length() == 32) {
+                try {
+                    return UUID.fromString(
+                        hex.substring(0, 8) + "-" + hex.substring(8, 12) + "-" + hex.substring(12, 16) + "-"
+                        + hex.substring(16, 20) + "-" + hex.substring(20));
+                } catch (IllegalArgumentException ignored) {}
+            }
+        }
+        String seed = "netease:player:" + neteaseUid;
+        return UUID.nameUUIDFromBytes(seed.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    }
 }

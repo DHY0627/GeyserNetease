@@ -27,7 +27,17 @@ public final class ServerRestartUtil {
     private static final TransportHelper.TransportType TRANSPORT = TransportHelper.TRANSPORT_TYPE;
     private ServerRestartUtil() {}
 
-    public static void restart(boolean onlyNeteaseClients) throws Exception {
+    public static void restart(boolean onlyNeteaseClients) {
+        try { doRestart(onlyNeteaseClients); }
+        catch (NoClassDefFoundError e) {
+            GeyserImpl.getInstance().getLogger().info("[GeyserNetease] Mod platform detected; skipping server restart. NetEase support active through channel hook.");
+        }
+        catch (Exception e) {
+            GeyserImpl.getInstance().getLogger().error("[GeyserNetease] Failed to restart bedrock listener", e);
+        }
+    }
+
+    private static void doRestart(boolean onlyNeteaseClients) throws Exception {
         GeyserImpl geyser = GeyserImpl.getInstance();
         geyser.getGeyserServer().shutdown();
 

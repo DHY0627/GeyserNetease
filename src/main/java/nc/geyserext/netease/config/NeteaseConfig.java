@@ -12,7 +12,10 @@ public final class NeteaseConfig {
     private boolean onlyNeteaseClients;
     @JsonProperty("debug-mode")
     private boolean debugMode;
+    @JsonProperty("disconnect-message")
+    private String disconnectMessage = "This server only accepts NetEase clients.";
 
     public boolean onlyNeteaseClients() { return onlyNeteaseClients; }
     public boolean debugMode() { return debugMode; }
+    public String disconnectMessage() { return disconnectMessage; }
 }

@@ -20,6 +20,7 @@ public class PlayerEnchantOptionsSerializer_v407_NetEase extends PlayerEnchantOp
         helper.writeArray(buffer, option.getEnchants0(), (b, enchant) -> serializeEnchant(b, enchant, helper));
         helper.writeArray(buffer, option.getEnchants1(), (b, enchant) -> serializeEnchant(b, enchant, helper));
         helper.writeArray(buffer, option.getEnchants2(), (b, enchant) -> serializeEnchant(b, enchant, helper));
+        VarInts.writeUnsignedInt(buffer, 0);
         helper.writeString(buffer, option.getEnchantName());
         VarInts.writeUnsignedInt(buffer, option.getEnchantNetId());
     }
@@ -34,6 +35,10 @@ public class PlayerEnchantOptionsSerializer_v407_NetEase extends PlayerEnchantOp
         helper.readArray(buffer, enchants1, b -> deserializeEnchant(b, helper));
         List<EnchantData> enchants2 = new ObjectArrayList<>();
         helper.readArray(buffer, enchants2, b -> deserializeEnchant(b, helper));
+        int customCount = VarInts.readUnsignedInt(buffer);
+        for (int i = 0; i < customCount; i++) {
+            deserializeEnchant(buffer, helper);
+        }
         String enchantName = helper.readString(buffer);
         int enchantNetId = VarInts.readUnsignedInt(buffer);
         return new EnchantOptionData(cost, primarySlot, enchants0, enchants1, enchants2, enchantName, enchantNetId);
@@ -42,11 +47,13 @@ public class PlayerEnchantOptionsSerializer_v407_NetEase extends PlayerEnchantOp
     protected void serializeEnchant(ByteBuf buffer, EnchantData enchant, BedrockCodecHelper helper) {
         buffer.writeByte(enchant.getType());
         buffer.writeByte(enchant.getLevel());
+        helper.writeString(buffer, "");
     }
 
     protected EnchantData deserializeEnchant(ByteBuf buffer, BedrockCodecHelper helper) {
         int type = buffer.readUnsignedByte();
         int level = buffer.readUnsignedByte();
+        helper.readString(buffer);
         return new EnchantData(type, level);
     }
 }

@@ -3,13 +3,18 @@ package org.cloudburstmc.protocol.bedrock.packet;
 import org.cloudburstmc.protocol.bedrock.annotation.NetEaseOnly;
 import org.cloudburstmc.protocol.common.PacketSignal;
 
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
+/**
+ * Sent by NetEase servers to confirm which custom skins have passed censorship checks.
+ */
 @NetEaseOnly
 public class ConfirmSkinPacket implements BedrockPacket {
     private List<SkinEntry> entries = new ArrayList<>();
+
     public List<SkinEntry> getEntries() { return entries; }
     public void setEntries(List<SkinEntry> entries) { this.entries = entries; }
 

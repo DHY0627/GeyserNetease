@@ -9,6 +9,7 @@ import nc.geyserext.netease.util.BlockHashUtils;
 import org.cloudburstmc.nbt.NbtMap;
 import org.cloudburstmc.protocol.bedrock.BedrockServerSession;
 import org.cloudburstmc.protocol.bedrock.data.definitions.BlockDefinition;
+import org.cloudburstmc.protocol.bedrock.data.skin.SerializedSkin;
 import org.cloudburstmc.protocol.bedrock.packet.*;
 import org.geysermc.geyser.network.GameProtocol;
 import org.geysermc.geyser.registry.type.BlockMappings;
@@ -25,29 +26,65 @@ public class SpoofedUpstream extends UpstreamSession {
     private final int[] rtToHash;
     private final boolean[] hValid;
     private final boolean hashing;
+    private final long neteaseUid;
+    private boolean skinConfirmed;
 
     public SpoofedUpstream(UpstreamSession real, BedrockServerSession s,
-            int[] rt, boolean[] hv, boolean hashing) {
+            int[] rt, boolean[] hv, boolean hashing, long neteaseUid) {
         super(s);
         this.real = real;
         this.spoofedVersion = GameProtocol.DEFAULT_BEDROCK_PROTOCOL;
         this.rtToHash = rt;
         this.hValid = hv;
         this.hashing = hashing;
+        this.neteaseUid = neteaseUid;
     }
 
     @Override public void disconnect(String r) { real.disconnect(r); }
     @Override public int getProtocolVersion() { return spoofedVersion; }
     @Override public BedrockServerSession getSession() { return real.getSession(); }
     @Override public boolean isClosed() { return real.isClosed(); }
-    @Override public void sendPacket(BedrockPacket p) { real.sendPacket(rewrite(p)); }
-    @Override public void sendPacketImmediately(BedrockPacket p) { real.sendPacketImmediately(rewrite(p)); }
+    @Override public void sendPacket(BedrockPacket p) { real.sendPacket(rewrite(p)); hook(p, false); }
+    @Override public void sendPacketImmediately(BedrockPacket p) { real.sendPacketImmediately(rewrite(p)); hook(p, true); }
 
     private BedrockPacket rewrite(BedrockPacket p) {
         if (!hashing) return p;
         if (p instanceof UpdateBlockPacket ub) ub.setDefinition(wrapDef(ub.getDefinition()));
         else if (p instanceof StartGamePacket sg) rewriteStartGame(sg);
         return p;
+    }
+
+    private void hook(BedrockPacket p, boolean immediate) {
+        if (!hashing) return;
+        if (p instanceof StartGamePacket && !skinConfirmed) {
+            skinConfirmed = true;
+            ConfirmSkinPacket csp = new ConfirmSkinPacket();
+            ConfirmSkinPacket.SkinEntry e = new ConfirmSkinPacket.SkinEntry();
+            e.setValid(true);
+            e.setUidStr(String.valueOf(neteaseUid));
+            csp.getEntries().add(e);
+            if (immediate) real.sendPacketImmediately(csp); else real.sendPacket(csp);
+        } else if (p instanceof PlayerSkinPacket ps && ps.getSkin() != null) {
+            sendSkinCsp(ps.getUuid(), ps.getSkin(), immediate);
+        } else if (p instanceof PlayerListPacket pl && pl.getAction() == PlayerListPacket.Action.ADD) {
+            for (PlayerListPacket.Entry entry : pl.getEntries()) {
+                if (entry.getSkin() != null && entry.getSkin().getSkinData().getImage().length > 0) {
+                    sendSkinCsp(entry.getUuid(), entry.getSkin(), immediate);
+                }
+            }
+        }
+    }
+
+    private void sendSkinCsp(UUID uuid, SerializedSkin skin, boolean immediate) {
+        ConfirmSkinPacket csp = new ConfirmSkinPacket();
+        ConfirmSkinPacket.SkinEntry e = new ConfirmSkinPacket.SkinEntry();
+        e.setValid(true);
+        e.setUuid(uuid);
+        e.setSkinBytes(skin.getSkinData().getImage());
+        e.setGeoStr(skin.getGeometryData());
+        e.setUidStr(String.valueOf(Math.abs(uuid.toString().replace("-", "").hashCode())));
+        csp.getEntries().add(e);
+        if (immediate) real.sendPacketImmediately(csp); else real.sendPacket(csp);
     }
 
     private void rewriteStartGame(StartGamePacket sg) {

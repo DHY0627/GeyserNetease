@@ -15,6 +15,7 @@ public class NetEaseCompression implements BatchCompression {
     private static final int MAX_DECOMPRESSED_BYTES = Integer.getInteger("bedrock.maxDecompressedBytes", 1024 * 1024 * 10);
 
     private int level = 7;
+
     public int getLevel() { return level; }
     public void setLevel(int level) { this.level = level; }
 

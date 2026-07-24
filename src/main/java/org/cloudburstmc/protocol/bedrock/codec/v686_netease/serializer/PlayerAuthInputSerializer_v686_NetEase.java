@@ -53,7 +53,7 @@ public class PlayerAuthInputSerializer_v686_NetEase extends PlayerAuthInputSeria
         buffer.writeFloatLE(playerRotationToCamera.getX());
         buffer.writeFloatLE(playerRotationToCamera.getY());
         buffer.writeBoolean(false);
-        buffer.writeBoolean(false);
+        buffer.writeBoolean(packet.getInputData().contains(PlayerAuthInputData.VERTICAL_COLLISION));
         buffer.writeByte(0);
     }
 
@@ -91,7 +91,8 @@ public class PlayerAuthInputSerializer_v686_NetEase extends PlayerAuthInputSeria
         buffer.readBoolean();
         buffer.readFloatLE(); buffer.readFloatLE();
         buffer.readBoolean();
-        buffer.readBoolean();
+        if (buffer.readBoolean())
+            packet.getInputData().add(PlayerAuthInputData.VERTICAL_COLLISION);
         buffer.readByte();
     }
 }

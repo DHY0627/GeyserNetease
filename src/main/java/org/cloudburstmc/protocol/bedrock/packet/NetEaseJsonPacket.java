@@ -3,9 +3,14 @@ package org.cloudburstmc.protocol.bedrock.packet;
 import org.cloudburstmc.protocol.bedrock.annotation.NetEaseOnly;
 import org.cloudburstmc.protocol.common.PacketSignal;
 
+
+/**
+ * Carries NetEase-specific JSON payloads.
+ */
 @NetEaseOnly
 public class NetEaseJsonPacket implements BedrockPacket {
     private String json;
+
     public String getJson() { return json; }
     public void setJson(String json) { this.json = json; }
 

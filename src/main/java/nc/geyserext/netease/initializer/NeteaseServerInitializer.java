@@ -5,6 +5,7 @@
 
 package nc.geyserext.netease.initializer;
 
+import nc.geyserext.netease.NeteaseExtension;
 import nc.geyserext.netease.handler.NetEaseUpstreamHandler;
 import nc.geyserext.netease.handler.UpstreamHandlerBase;
 import io.netty.channel.*;
@@ -62,7 +63,7 @@ public class NeteaseServerInitializer extends BedrockServerInitializer {
                 srv.setPacketHandler(new NetEaseUpstreamHandler(geyser, session));
             } else {
                 if (onlyNeteaseClients) {
-                    session.disconnect("This server only accepts NetEase clients.");
+                    session.disconnect(NeteaseExtension.CONFIG.disconnectMessage());
                     return;
                 }
                 srv.setPacketHandler(new UpstreamHandlerBase(geyser, session));

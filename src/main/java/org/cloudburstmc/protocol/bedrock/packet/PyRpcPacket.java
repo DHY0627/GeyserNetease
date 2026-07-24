@@ -3,10 +3,15 @@ package org.cloudburstmc.protocol.bedrock.packet;
 import org.cloudburstmc.protocol.bedrock.annotation.NetEaseOnly;
 import org.cloudburstmc.protocol.common.PacketSignal;
 
+
+/**
+ * NetEase packet used for Python scripting RPC calls.
+ */
 @NetEaseOnly
 public class PyRpcPacket implements BedrockPacket {
     private byte[] data;
     private long msgId;
+
     public byte[] getData() { return data; }
     public void setData(byte[] data) { this.data = data; }
     public long getMsgId() { return msgId; }
