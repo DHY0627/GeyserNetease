@@ -5,72 +5,93 @@
 
 package nc.geyserext.netease.initializer;
 
+import io.netty.channel.Channel;
 import nc.geyserext.netease.NeteaseExtension;
 import nc.geyserext.netease.handler.NetEaseUpstreamHandler;
-import nc.geyserext.netease.handler.UpstreamHandlerBase;
-import io.netty.channel.*;
-import io.netty.util.concurrent.DefaultThreadFactory;
 import org.checkerframework.checker.nullness.qual.NonNull;
 import org.cloudburstmc.netty.channel.raknet.config.RakChannelOption;
-import org.cloudburstmc.protocol.bedrock.*;
-import org.cloudburstmc.protocol.bedrock.netty.codec.compression.*;
-import org.cloudburstmc.protocol.bedrock.netty.codec.packet.*;
-import org.cloudburstmc.protocol.bedrock.netty.initializer.BedrockServerInitializer;
-import org.geysermc.geyser.*;
-import org.geysermc.geyser.network.*;
+import org.cloudburstmc.protocol.bedrock.BedrockPeer;
+import org.cloudburstmc.protocol.bedrock.BedrockServerSession;
+import org.cloudburstmc.protocol.bedrock.netty.codec.compression.CompressionCodec;
+import org.cloudburstmc.protocol.bedrock.netty.codec.compression.NoopCompression;
+import org.cloudburstmc.protocol.bedrock.netty.codec.compression.SimpleCompressionStrategy;
+import org.cloudburstmc.protocol.bedrock.netty.codec.packet.BedrockPacketCodec;
+import org.cloudburstmc.protocol.bedrock.netty.codec.packet.BedrockPacketCodec_v3;
+import org.geysermc.geyser.GeyserImpl;
+import org.geysermc.geyser.network.GeyserServerInitializer;
+import org.geysermc.geyser.network.bedrock.InvalidPacketHandler;
+import org.geysermc.geyser.network.bedrock.UpstreamPacketHandler;
 import org.geysermc.geyser.session.GeyserSession;
 
-public class NeteaseServerInitializer extends BedrockServerInitializer {
+/**
+ * 网易（NetEase）专用服务器初始化器。
+ *
+ * <p>与 Geyser 2.11 的 {@link GeyserServerInitializer} 兼容：RakNet 协议版本 8 的连接
+ * 使用 NoopCompression + BedrockPacketCodec_v3，并交给 {@link NetEaseUpstreamHandler} 处理。</p>
+ */
+public class NeteaseServerInitializer extends GeyserServerInitializer {
     private static final int NETEASE_RAKNET = 8;
-    private final GeyserImpl geyser;
+
     private final boolean rakCookie;
     private final boolean onlyNeteaseClients;
-    private final DefaultEventLoopGroup elg = new DefaultEventLoopGroup(0, new DefaultThreadFactory("Geyser player thread"));
 
     public NeteaseServerInitializer(GeyserImpl geyser, boolean rakCookie, boolean onlyNeteaseClients) {
-        this.geyser = geyser; this.rakCookie = rakCookie; this.onlyNeteaseClients = onlyNeteaseClients;
-    }
-    public DefaultEventLoopGroup eventLoopGroup() { return elg; }
-
-    @Override
-    protected void preInitChannel(Channel c) throws Exception {
-        if (!rakCookie) c.setOption(RakChannelOption.RAK_PROTOCOL_VERSION, 11);
-        super.preInitChannel(c);
-        int rakVer = c.config().getOption(RakChannelOption.RAK_PROTOCOL_VERSION);
-        if (rakVer == NETEASE_RAKNET) c.pipeline().replace(CompressionCodec.NAME, CompressionCodec.NAME, new CompressionCodec(new SimpleCompressionStrategy(new NoopCompression()), false));
+        super(geyser, "Geyser player thread");
+        this.rakCookie = rakCookie;
+        this.onlyNeteaseClients = onlyNeteaseClients;
     }
 
     @Override
-    protected void initPacketCodec(Channel c) throws Exception {
-        int rakVer = c.config().getOption(RakChannelOption.RAK_PROTOCOL_VERSION);
-        if (rakVer == NETEASE_RAKNET) { c.pipeline().addLast(BedrockPacketCodec.NAME, new BedrockPacketCodec_v3()); return; }
-        super.initPacketCodec(c);
+    protected void preInitChannel(Channel channel) throws Exception {
+        if (!rakCookie) {
+            channel.setOption(RakChannelOption.RAK_PROTOCOL_VERSION, 11);
+        }
+        super.preInitChannel(channel);
+
+        int rakVer = channel.config().getOption(RakChannelOption.RAK_PROTOCOL_VERSION);
+        if (rakVer == NETEASE_RAKNET) {
+            channel.pipeline().replace(CompressionCodec.NAME, CompressionCodec.NAME,
+                new CompressionCodec(new SimpleCompressionStrategy(new NoopCompression()), false));
+        }
+    }
+
+    @Override
+    protected void initPacketCodec(Channel channel) throws Exception {
+        int rakVer = channel.config().getOption(RakChannelOption.RAK_PROTOCOL_VERSION);
+        if (rakVer == NETEASE_RAKNET) {
+            channel.pipeline().addLast(BedrockPacketCodec.NAME, new BedrockPacketCodec_v3());
+            return;
+        }
+        super.initPacketCodec(channel);
     }
 
     @Override
     public void initSession(@NonNull BedrockServerSession srv) {
         try {
-            srv.setLogging(geyser.config().debugMode());
-            GeyserSession session = new GeyserSession(geyser, srv, elg.next());
+            srv.setLogging(this.geyser.config().debugMode());
+            GeyserSession session = new GeyserSession(this.geyser, srv, getEventLoopGroup().next());
+
             if (!srv.isSubClient()) {
-                Channel c = srv.getPeer().getChannel();
+                Channel channel = srv.getPeer().getChannel();
                 try {
-                    c.pipeline().addAfter(BedrockPacketCodec.NAME, InvalidPacketHandler.NAME, new InvalidPacketHandler(session));
-                } catch (Exception ignored) {}
+                    channel.pipeline().addAfter(BedrockPeer.NAME, InvalidPacketHandler.NAME, new InvalidPacketHandler(session));
+                } catch (Exception ignored) {
+                }
             }
+
             int rakVer = srv.getPeer().getChannel().config().getOption(RakChannelOption.RAK_PROTOCOL_VERSION);
             if (rakVer == NETEASE_RAKNET) {
-                srv.setPacketHandler(new NetEaseUpstreamHandler(geyser, session));
+                srv.setPacketHandler(new NetEaseUpstreamHandler(this.geyser, session));
             } else {
                 if (onlyNeteaseClients) {
                     session.disconnect(NeteaseExtension.CONFIG.disconnectMessage());
                     return;
                 }
-                srv.setPacketHandler(new UpstreamHandlerBase(geyser, session));
+                srv.setPacketHandler(new UpstreamPacketHandler(this.geyser, session));
             }
-        } catch (Throwable e) { geyser.getLogger().error("Error initializing player!", e); srv.disconnect(e.getMessage()); }
+        } catch (Throwable e) {
+            this.geyser.getLogger().error("Error occurred while initializing player!", e);
+            srv.disconnect(e.getMessage());
+        }
     }
-
-    @Override
-    protected BedrockPeer createPeer(Channel c) { return new GeyserBedrockPeer(c, this::createSession); }
 }

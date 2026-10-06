@@ -1,0 +1,31 @@
+# ===== Gradle / 构建产物 =====
+.gradle/
+build/
+out/
+bin/
+*.class
+
+# 扩展 jar：源码可用 gradlew shadowJar 重新构建；仓库只保留一个可直接安装的正式版
+*.jar
+!dist/GeyserNeteaseExtension.jar
+
+# ===== 运行/构建日志 =====
+*.log
+build_log.txt
+jar_log*.txt
+geyser-netease-java.log
+
+# ===== 本地配置（可能含服务器信息）=====
+config.local.yml
+extensions/
+plugins/
+
+# ===== 编辑器 / 系统 =====
+.idea/
+.vscode/
+*.iml
+*.swp
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
