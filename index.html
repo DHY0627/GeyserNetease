@@ -228,11 +228,11 @@
             让网易版 Minecraft 玩家也能进入你的服务器，与国际版、Java 版玩家同服游玩。
         </p>
         <div class="btns">
-            <a href="https://cdn.modrinth.com/data/ESPZPamR/versions/EbaOeB8k/GeyserNeteaseExtension.jar?mr_download_reason=standalone" class="btn btn-download">
+            <a href="https://github.com/DHY0627/GeyserNetease/raw/main/dist/GeyserNeteaseExtension.jar" class="btn btn-download">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                 下载
             </a>
-            <a href="https://github.com/LoHJG/GeyserNetease" class="btn btn-soft" target="_blank" rel="noopener">
+            <a href="https://github.com/DHY0627/GeyserNetease" class="btn btn-soft" target="_blank" rel="noopener">
                 <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
                 GitHub
             </a>
@@ -351,14 +351,15 @@ debug-mode: false</pre>
                 <div class="step-num">1</div>
                 <div class="step-body">
                     <h3>下载</h3>
-                    <p>从 <a href="https://github.com/LoHJG/GeyserNetease/releases" target="_blank" rel="noopener" style="color:var(--accent);">GitHub Releases</a> 获取最新版本的 jar 文件。</p>
+                    <p>直接下载 <a href="https://github.com/DHY0627/GeyserNetease/raw/main/dist/GeyserNeteaseExtension.jar" style="color:var(--accent);">dist/GeyserNeteaseExtension.jar</a>（3,118,355 字节，适配 Geyser 2.11.3，扩展版本 1.1.0）。</p>
+                    <p style="margin-top:8px;font-size:13px;opacity:.75;">SHA256：<code style="background:rgba(0,113,227,.07);padding:3px 9px;border-radius:6px;font-size:12px;">3388f14b508d6c5e0dea5021ceb27647dded65b7b48a1531c78a3a51216dbdf9</code></p>
                 </div>
             </div>
             <div class="step reveal">
                 <div class="step-num">2</div>
                 <div class="step-body">
                     <h3>安装</h3>
-                    <p>将 jar 放入 Geyser 的 extensions 目录，重启 Geyser。</p>
+                    <p>将 jar 放入 Geyser 的 extensions 目录，重启 Geyser。JVM 参数需加 <code style="background:rgba(0,113,227,.07);padding:3px 9px;border-radius:6px;font-size:13px;">-DGeyserNetease.ServerAddress=你的域名:19132</code>（必填，否则 java 握手 hostname 为空会被代理静默断流）。</p>
                 </div>
             </div>
             <div class="step reveal">

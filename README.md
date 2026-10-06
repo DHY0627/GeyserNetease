@@ -36,6 +36,40 @@
 
 ---
 
+## 直接下载（免编译）
+
+不想装 JDK / Gradle 的话，直接用仓库里随源码提交的预编译 jar：
+
+**[`dist/GeyserNeteaseExtension.jar`](dist/GeyserNeteaseExtension.jar)**
+
+| 项 | 值 |
+|---|---|
+| 文件大小 | 3,118,355 字节（3045 KB） |
+| 构建时间 | 2026-10-07 00:49:55 |
+| SHA256 | `3388f14b508d6c5e0dea5021ceb27647dded65b7b48a1531c78a3a51216dbdf9` |
+| 适配 Geyser | 2.11.3 |
+| 扩展版本 | 1.1.0 |
+| 包含修复 | 下文「已知问题 1」的 java 握手 hostname 修复 |
+
+`extension.yml` 元信息：
+
+```yaml
+id: geyser-netease
+name: GeyserNetEase
+main: nc.geyserext.netease.NeteaseExtension
+version: 1.1.0
+```
+
+> 该 jar 与源码一一对应：构建后 `dist/` 与 `build/libs/` 的文件哈希一致，
+> 想自己核对可以 `sha256sum dist/GeyserNeteaseExtension.jar`。
+
+> ⚠️ **jar 里的默认 `ServerAddress` 是脱敏示例值 `example.com:19132`，不是可用地址。**
+> 启动 Geyser 时必须用 `-DGeyserNetease.ServerAddress=你的域名:端口` 覆盖，
+> 否则会触发下文「已知问题 1」的静默断流。
+
+> 注意 `dist/` 里若还有 `GeyserNeteaseExtension-hostnamefix.jar` / `-sniff.jar`，
+> 那是早期调试用的变体，**不要使用**，请始终用 `GeyserNeteaseExtension.jar`。
+
 ## 构建
 
 ```bash
@@ -47,6 +81,12 @@ gradlew.bat shadowJar
 ```
 
 产物：`build/libs/GeyserNeteaseExtension.jar`
+
+构建完成后建议同步到 `dist/`，让仓库里的预编译包与源码保持一致：
+
+```bash
+cp build/libs/GeyserNeteaseExtension.jar dist/GeyserNeteaseExtension.jar
+```
 
 > 若 gradle wrapper 下载失败（企业网络 / 证书问题），可直接用本机 Gradle 构建：
 > `gradle shadowJar --offline`
@@ -70,8 +110,6 @@ gradlew.bat shadowJar
    [geyser-netease] NetEase Extension initialized — RakNet v8 clients supported.
    ```
 
-> 不想自己编译？直接使用仓库里随源码提交的 **`dist/GeyserNeteaseExtension.jar`**（本版本构建，含下文「已知问题 1」的 hostname 修复）。
-
 ## 配置
 
 首次启动会在扩展目录生成 `config.yml`：
@@ -91,10 +129,26 @@ debug-mode: false
 
 | 参数 | 默认 | 说明 |
 |---|---|---|
+| `-DGeyserNetease.ServerAddress` | `example.com:19132` | ⚠️ **必须覆盖**。修正网易客户端 `ServerAddress`（`:0`）用的真实地址，填你自己的 `域名:端口` |
 | `-DGeyserNetease.SkipEncryption` | `true` | 跳过 Bedrock 层加密握手（网易局域网流程本就不加密）；设 `false` 可强制走 `ServerToClientHandshake` |
-| `-DGeyserNetease.ServerAddress` | `example.com:19132` | 修正网易客户端 `ServerAddress`（`:0`）用的真实地址，**请换成你自己的域名:端口** |
 | `-DGeyserNetease.AsciiJavaName` | `false` | `true` 时 java 侧使用纯 ASCII 登录名（`NE+uid`），Bedrock 侧显示名不变 |
 | `-DGeyserNetease.Sniff` | `false` | `true` 时把 Geyser ↔ 代理 的双向包写入运行目录的 `geyser-netease-java.log`（排错用） |
+
+**为什么 `ServerAddress` 必须设置**：网易局域网客户端上报的 `ServerAddress` 是 `":0"`，
+Geyser 的 `GeyserSession.joinAddress()` 取「最后一个 `:` 之前」的部分会得到**空字符串**。
+配合 `forward-hostname: true`，java 握手就会带着空 hostname 发给代理，
+代理在登录阶段**静默关闭连接**（不打任何日志），客户端只显示「数据流终止」。
+
+所以启动命令至少要长这样：
+
+```bash
+java -DGeyserNetease.ServerAddress=你的域名:19132 -jar geyser.jar
+```
+
+```ini
+# 用 systemd / 启动脚本时，注意 -D 要放在 -jar 之前
+ExecStart=/usr/bin/java -DGeyserNetease.ServerAddress=你的域名:19132 -jar /opt/geyser/geyser.jar
+```
 
 ---
 
@@ -159,6 +213,7 @@ GeyserNetease/
 ├── src/main/resources/{extension.yml,config.yml}
 ├── dist/
 │   └── GeyserNeteaseExtension.jar                  ★ 随源码提交的构建产物，可直接安装
+│                                                     SHA256 `3388f14b508d6c5e0dea5021ceb27647dded65b7b48a1531c78a3a51216dbdf9`
 ├── index.html / CNAME                              项目主页（GitHub Pages）
 ├── .gitignore / .gitattributes                     构建产物与换行符规则
 └── build.gradle.kts / settings.gradle.kts / gradlew*
