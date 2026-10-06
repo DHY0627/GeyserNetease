@@ -92,7 +92,7 @@ debug-mode: false
 | 参数 | 默认 | 说明 |
 |---|---|---|
 | `-DGeyserNetease.SkipEncryption` | `true` | 跳过 Bedrock 层加密握手（网易局域网流程本就不加密）；设 `false` 可强制走 `ServerToClientHandshake` |
-| `-DGeyserNetease.ServerAddress` | `example.com:49780` | 修正网易客户端 `ServerAddress`（`:0`）用的真实地址，**请换成你自己的域名:端口** |
+| `-DGeyserNetease.ServerAddress` | `example.com:19132` | 修正网易客户端 `ServerAddress`（`:0`）用的真实地址，**请换成你自己的域名:端口** |
 | `-DGeyserNetease.AsciiJavaName` | `false` | `true` 时 java 侧使用纯 ASCII 登录名（`NE+uid`），Bedrock 侧显示名不变 |
 | `-DGeyserNetease.Sniff` | `false` | `true` 时把 Geyser ↔ 代理 的双向包写入运行目录的 `geyser-netease-java.log`（排错用） |
 
