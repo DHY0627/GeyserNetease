@@ -365,7 +365,7 @@ public class NetEaseUpstreamHandler extends UpstreamHandlerBase {
      * 这里强制填一个真实的公开地址。可用 {@code -DGeyserNetease.ServerAddress=...} 覆盖。</p>
      */
     private static final String FORCED_SERVER_ADDRESS =
-        System.getProperty("GeyserNetease.ServerAddress", "be.4f4t.top:49780");
+        System.getProperty("GeyserNetease.ServerAddress", "example.com:49780");
 
     /** 从 {@link #FORCED_SERVER_ADDRESS} 取主机部分（去掉端口）。 */
     private static String handshakeHost() {
