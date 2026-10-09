@@ -133,6 +133,7 @@ debug-mode: false
 | `-DGeyserNetease.SkipEncryption` | `true` | 跳过 Bedrock 层加密握手（网易局域网流程本就不加密）；设 `false` 可强制走 `ServerToClientHandshake` |
 | `-DGeyserNetease.AsciiJavaName` | `false` | `true` 时 java 侧使用纯 ASCII 登录名（`NE+uid`），Bedrock 侧显示名不变 |
 | `-DGeyserNetease.Sniff` | `false` | `true` 时把 Geyser ↔ 代理 的双向包写入运行目录的 `geyser-netease-java.log`（排错用） |
+| `-DGeyserNetease.Debug` | `false` | `true` 时输出逐连接的诊断日志（网易路径已激活 / 跳过加密握手 / `ServerAddress` 修正 / java 登录名等）。默认静默，只在排查时打开 |
 
 **为什么 `ServerAddress` 必须设置**：网易局域网客户端上报的 `ServerAddress` 是 `":0"`，
 Geyser 的 `GeyserSession.joinAddress()` 取「最后一个 `:` 之前」的部分会得到**空字符串**。

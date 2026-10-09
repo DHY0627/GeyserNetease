@@ -68,16 +68,16 @@ public class NetEaseUpstreamHandler extends UpstreamHandlerBase {
         Integer rakVer = getRakVersion();
         boolean isNetEase = rakVer != null && rakVer == 8;
         if (!isNetEase) {
-            NeteaseExtension.LOG.info("[GeyserNetease] 非网易连接（rakVer=" + rakVer + "），交回标准处理");
+            NeteaseExtension.debug("[GeyserNetease] 非网易连接（rakVer=" + rakVer + "），交回标准处理");
             return super.handle(packet);
         }
 
         BedrockCodec codec = NeteaseCodecRegistry.getCodec(packet.getProtocolVersion());
         if (codec == null) {
-            NeteaseExtension.LOG.info("[GeyserNetease] 未注册的网易协议版本 " + packet.getProtocolVersion() + "，交回标准处理");
+            NeteaseExtension.debug("[GeyserNetease] 未注册的网易协议版本 " + packet.getProtocolVersion() + "，交回标准处理");
             return super.handle(packet);
         }
-        NeteaseExtension.LOG.info("[GeyserNetease] 网易路径已激活：rakVer=" + rakVer
+        NeteaseExtension.debug("[GeyserNetease] 网易路径已激活：rakVer=" + rakVer
             + " 协议=" + packet.getProtocolVersion() + " 跳过加密=" + SKIP_ENCRYPTION);
 
         session.getUpstream().getSession().setCodec(codec);
@@ -138,13 +138,13 @@ public class NetEaseUpstreamHandler extends UpstreamHandlerBase {
                 patchServerAddress(session.getClientData());
 
                 if (!SKIP_ENCRYPTION) {
-                    NeteaseExtension.LOG.info("[GeyserNetease] 发送 ServerToClientHandshake（加密握手）");
+                    NeteaseExtension.debug("[GeyserNetease] 发送 ServerToClientHandshake（加密握手）");
                     startEncryptionHandshake(session, result.identityClaims().parsedIdentityPublicKey());
                     if (session.isClosed()) { session.forciblyCloseUpstream(); return PacketSignal.HANDLED; }
                     neteaseSession.setLoginDeferred(true);
                 } else {
                     // 网易局域网流程不做 Bedrock 层加密：不发送握手、不启用加密
-                    NeteaseExtension.LOG.info("[GeyserNetease] 已跳过 ServerToClientHandshake（网易局域网流程不做 Bedrock 层加密）");
+                    NeteaseExtension.debug("[GeyserNetease] 已跳过 ServerToClientHandshake（网易局域网流程不做 Bedrock 层加密）");
                     neteaseSession.setLoginDeferred(false);
                 }
             }
@@ -204,7 +204,7 @@ public class NetEaseUpstreamHandler extends UpstreamHandlerBase {
     private void sendLoginSuccessAndPacks() {
         if (loginFlowCompleted || session.isClosed()) return;
         loginFlowCompleted = true;
-        NeteaseExtension.LOG.info("[GeyserNetease] 下发 PlayStatus(LOGIN_SUCCESS) + ResourcePacksInfo");
+        NeteaseExtension.debug("[GeyserNetease] 下发 PlayStatus(LOGIN_SUCCESS) + ResourcePacksInfo");
 
         PlayStatusPacket ps = new PlayStatusPacket();
         ps.setStatus(PlayStatusPacket.Status.LOGIN_SUCCESS);
@@ -251,7 +251,7 @@ public class NetEaseUpstreamHandler extends UpstreamHandlerBase {
                 finishedResourcePackSending = true;
                 if (geyser.config().java().authType() != AuthType.ONLINE) {
                     String javaName = javaLoginName(session.getAuthData().name(), neteaseSession.uid());
-                    NeteaseExtension.LOG.info("[GeyserNetease] Java 侧登录名 = " + javaName
+                    NeteaseExtension.debug("[GeyserNetease] Java 侧登录名 = " + javaName
                         + "（Bedrock 显示名 = " + session.getAuthData().name() + "，ASCII=" + ASCII_JAVA_NAME + "）");
                     session.authenticate(javaName);
                 } else if (!couldLoginUserByName(session.getAuthData().name())) {
@@ -393,7 +393,7 @@ public class NetEaseUpstreamHandler extends UpstreamHandlerBase {
                 f.setAccessible(true);
                 f.set(bcd, FORCED_SERVER_ADDRESS);
             }
-            NeteaseExtension.LOG.info("[GeyserNetease] 客户端 ServerAddress \"" + cur + "\" → \""
+            NeteaseExtension.debug("[GeyserNetease] 客户端 ServerAddress \"" + cur + "\" → \""
                 + FORCED_SERVER_ADDRESS + "\"（java 握手 hostname 依赖它）");
         } catch (Throwable e) {
             NeteaseExtension.LOG.error("[GeyserNetease] 修正 ServerAddress 失败: " + e);
@@ -429,7 +429,7 @@ public class NetEaseUpstreamHandler extends UpstreamHandlerBase {
             java.io.File f = new java.io.File("geyser-netease-java.log");
             SNIFF_PATH = f.getAbsolutePath();
             SNIFF_OUT = new java.io.PrintWriter(new java.io.FileWriter(f, true), true);
-            NeteaseExtension.LOG.info("[GeyserNetease] Java 侧嗅探日志: " + SNIFF_PATH);
+            NeteaseExtension.debug("[GeyserNetease] Java 侧嗅探日志: " + SNIFF_PATH);
             sniff("===== 嗅探启动 bedrockName="
                 + (session.getAuthData() != null ? session.getAuthData().name() : "?")
                 + " xuid=" + session.xuid() + " path=" + SNIFF_PATH, null);
