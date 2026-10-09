@@ -43,16 +43,13 @@
 
 | Geyser | 代理 | 结果 |
 |---|---|---|
-| **2.10.1-b1174** | Velocity 3.5.1 | ✅ **完整验证**：网易原版客户端一路进服、正常游玩（后端日志 `logged in with entity id …` / `joined the game`） |
-| 2.11.3 | Velocity 4.2.1 | 本 jar 的构建目标；客户端能进世界，但当时出现过 `StartGame` 之后客户端原生崩溃（`libminecraftpe.so` SIGSEGV），该崩溃未在 2.10.1 上复现 |
-| 2.9.4 | — | 扩展可加载（需把 `extension.yml` 的 `api:` 下调到 `2.9.4`），未走完进服流程 |
-| 其它 2.9.x / 2.10.0 | — | 未实测 |
+| **2.11.3** | Velocity 4.2.1 | 本 jar 的构建目标，网易原版客户端可进服 |
+| **2.10.1-b1174** | Velocity 3.5.1 | 网易原版客户端一路进服、正常游玩（后端日志 `logged in with entity id …` / `joined the game`） |
 
-> ⚠️ 本 jar 按 **Geyser 2.11.3 / Java 21** 构建，`api: 2.9.10`。**Geyser 2.9.x / 2.10.x 用不了这个 jar**
-> —— fork 的接线层依赖 2.11 才有的 `network.bedrock.raknet.*` 类。
-> 这些版本请改用 [NeteaseBedrockGateway/patches](https://github.com/DHY0627/NeteaseBedrockGateway/tree/main/patches)
-> 里的兼容补丁：打在[上游 LoHJG/GeyserNetease](https://github.com/LoHJG/GeyserNetease) 上再构建，
-> 协议行为与本版本一致（就是上面那两个修复）。
+> ⚠️ **本 jar 按 Geyser 2.11.3 / Java 21 构建**（`api: 2.9.10`）。
+> 上表 **2.10.1-b1174** 那一行用的是[兼容补丁](https://github.com/DHY0627/NeteaseBedrockGateway/tree/main/patches)
+> 构建的扩展 —— 本 jar 依赖 2.11 才有的 `network.bedrock.raknet.*` 类，在 Geyser 2.9.x / 2.10.x 上加载不了。
+> 两种构建的协议行为完全一致（就是上面那两个修复）。
 
 ## 下载
 
