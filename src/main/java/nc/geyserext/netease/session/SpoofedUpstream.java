@@ -5,6 +5,7 @@
 
 package nc.geyserext.netease.session;
 
+import nc.geyserext.netease.NeteaseExtension;
 import nc.geyserext.netease.util.BlockHashUtils;
 import org.cloudburstmc.nbt.NbtMap;
 import org.cloudburstmc.protocol.bedrock.BedrockServerSession;
@@ -20,6 +21,9 @@ import java.lang.reflect.Field;
 import java.util.*;
 
 public class SpoofedUpstream extends UpstreamSession {
+
+    /** Geyser 扩展命令的根命令名；网易客户端会把命令补全渲染成 "geyser:xxx" 提示，需要从下发的命令表里剔除。 */
+    private static final String GEYSER_COMMAND_ROOT = "geyser";
 
     private final UpstreamSession real;
     private final int spoofedVersion;
@@ -44,8 +48,35 @@ public class SpoofedUpstream extends UpstreamSession {
     @Override public int getProtocolVersion() { return spoofedVersion; }
     @Override public BedrockServerSession getSession() { return real.getSession(); }
     @Override public boolean isClosed() { return real.isClosed(); }
-    @Override public void sendPacket(BedrockPacket p) { real.sendPacket(rewrite(p)); hook(p, false); }
-    @Override public void sendPacketImmediately(BedrockPacket p) { real.sendPacketImmediately(rewrite(p)); hook(p, true); }
+
+    @Override public void sendPacket(BedrockPacket p) {
+        stripGeyserCommands(p);
+        real.sendPacket(rewrite(p));
+        hook(p, false);
+    }
+
+    @Override public void sendPacketImmediately(BedrockPacket p) {
+        stripGeyserCommands(p);
+        real.sendPacketImmediately(rewrite(p));
+        hook(p, true);
+    }
+
+    /**
+     * 网易客户端不使用标准 Bedrock 的命令补全表：<code>AvailableCommandsPacket</code> 里由
+     * Geyser 扩展导出的 <code>geyser</code> 根命令（help/list/quickactions 等）会在玩家点击屏幕时
+     * 以 "geyser:xxx" 的形式弹在聊天栏下方。这里在下发前把该根命令剔除，Java 服务器的原生命令保持不变。
+     */
+    private static void stripGeyserCommands(BedrockPacket p) {
+        if (p instanceof AvailableCommandsPacket available) {
+            int before = available.getCommands().size();
+            available.getCommands().removeIf(command -> GEYSER_COMMAND_ROOT.equals(command.getName()));
+            int removed = before - available.getCommands().size();
+            if (removed > 0) {
+                NeteaseExtension.debug("[netease] 已从 AvailableCommandsPacket 移除 " + removed + " 个 geyser 命令，剩余 "
+                    + available.getCommands().size() + " 个");
+            }
+        }
+    }
 
     private BedrockPacket rewrite(BedrockPacket p) {
         if (!hashing) return p;
@@ -56,19 +87,17 @@ public class SpoofedUpstream extends UpstreamSession {
 
     private void hook(BedrockPacket p, boolean immediate) {
         if (!hashing) return;
-        if (p instanceof StartGamePacket && !skinConfirmed) {
+        // 注意：这里刻意不再在 StartGame 时发“空占位”ConfirmSkin。
+        // ConfirmSkinSerializer 会对 uuid / skinBytes / geoStr 做 checkNotNull，
+        // 早期实现只填了 valid + uidStr，编码阶段必然抛异常，导致网易客户端等不到确认。
+        // 本地玩家皮肤由随后的 PlayerSkinPacket 分支补发。
+        if (p instanceof StartGamePacket) {
             skinConfirmed = true;
-            ConfirmSkinPacket csp = new ConfirmSkinPacket();
-            ConfirmSkinPacket.SkinEntry e = new ConfirmSkinPacket.SkinEntry();
-            e.setValid(true);
-            e.setUidStr(String.valueOf(neteaseUid));
-            csp.getEntries().add(e);
-            if (immediate) real.sendPacketImmediately(csp); else real.sendPacket(csp);
         } else if (p instanceof PlayerSkinPacket ps && ps.getSkin() != null) {
             sendSkinCsp(ps.getUuid(), ps.getSkin(), immediate);
         } else if (p instanceof PlayerListPacket pl && pl.getAction() == PlayerListPacket.Action.ADD) {
             for (PlayerListPacket.Entry entry : pl.getEntries()) {
-                if (entry.getSkin() != null && entry.getSkin().getSkinData().getImage().length > 0) {
+                if (entry.getSkin() != null) {
                     sendSkinCsp(entry.getUuid(), entry.getSkin(), immediate);
                 }
             }
@@ -76,13 +105,40 @@ public class SpoofedUpstream extends UpstreamSession {
     }
 
     private void sendSkinCsp(UUID uuid, SerializedSkin skin, boolean immediate) {
+        if (uuid == null) return;
+
+        byte[] image = null;
+        String geo = null;
+        try {
+            if (skin.getSkinData() != null) {
+                image = skin.getSkinData().getImage();
+            }
+            geo = skin.getGeometryData();
+        } catch (Throwable ignored) {
+            // 老版本 / 异常皮肤数据，按“无皮肤图”处理
+        }
+
         ConfirmSkinPacket csp = new ConfirmSkinPacket();
         ConfirmSkinPacket.SkinEntry e = new ConfirmSkinPacket.SkinEntry();
-        e.setValid(true);
         e.setUuid(uuid);
-        e.setSkinBytes(skin.getSkinData().getImage());
-        e.setGeoStr(skin.getGeometryData());
         e.setUidStr(String.valueOf(Math.abs(uuid.toString().replace("-", "").hashCode())));
+
+        if (image != null && image.length > 0) {
+            e.setValid(true);
+            e.setSkinBytes(image);
+            e.setGeoStr(geo != null ? geo : "");
+            NeteaseExtension.debug("[netease] ConfirmSkin valid uuid=" + uuid
+                + " image=" + image.length + " geo=" + (geo == null ? -1 : geo.length()));
+        } else {
+            // Persona / 4D 皮肤没有 64x64 皮肤图。ConfirmSkinSerializer 对 null 字段会抛异常
+            // （writeByteArray / writeString 内部 checkNotNull），必须显式发 valid=false 的空条目，
+            // 让对端回退到默认皮肤，而不是一直等待一个永远发不出去的确认包。
+            e.setValid(false);
+            e.setSkinBytes(new byte[0]);
+            e.setGeoStr("");
+            NeteaseExtension.debug("[netease] ConfirmSkin invalid(fallback) uuid=" + uuid);
+        }
+
         csp.getEntries().add(e);
         if (immediate) real.sendPacketImmediately(csp); else real.sendPacket(csp);
     }

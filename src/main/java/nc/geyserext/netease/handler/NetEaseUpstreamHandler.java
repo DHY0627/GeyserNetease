@@ -224,6 +224,18 @@ public class NetEaseUpstreamHandler extends UpstreamHandlerBase {
         return defaultHandler(packet);
     }
 
+    /**
+     * 记录网易客户端发来的聊天包，便于定位“聊天不可用”问题（仅 debug 模式打印）。
+     * 不在 debug 模式下做任何额外处理，转发行为与之前完全一致。
+     */
+    @Override
+    public PacketSignal handle(TextPacket packet) {
+        NeteaseExtension.debug("[GeyserNetease] 收到 TextPacket type=" + packet.getType()
+            + " message='" + packet.getMessage() + "' filtered='" + packet.getFilteredMessage()
+            + "' sourceName='" + packet.getSourceName() + "' xuid='" + packet.getXuid() + "'");
+        return defaultHandler(packet);
+    }
+
     @Override
     public PacketSignal handle(ClientToServerHandshakePacket packet) {
         if (neteaseSession != null && neteaseSession.loginDeferred()) {
