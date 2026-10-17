@@ -25,6 +25,13 @@ public class SpoofedUpstream extends UpstreamSession {
     /** Geyser 扩展命令的根命令名；网易客户端会把命令补全渲染成 "geyser:xxx" 提示，需要从下发的命令表里剔除。 */
     private static final String GEYSER_COMMAND_ROOT = "geyser";
 
+    /**
+     * Geyser 用 TIP 类型的 TextPacket 向客户端"隐藏"地传 JSON UI 数据（<code>GeyserSession#sendJsonUIData</code>
+     * 拼出 "geyseropt:cooldown:non"），依赖 Geyser 集成资源包里改过的 hud_screen.json 把它解析成冷却指示器。
+     * 网易客户端不加载 / 不认这套 JSON UI 补丁，会把这串文本直接显示在屏幕上，因此在下发前丢弃。
+     */
+    private static final String GEYSER_UI_TEXT_PREFIX = "geyseropt:";
+
     private final UpstreamSession real;
     private final int spoofedVersion;
     private final int[] rtToHash;
@@ -50,12 +57,14 @@ public class SpoofedUpstream extends UpstreamSession {
     @Override public boolean isClosed() { return real.isClosed(); }
 
     @Override public void sendPacket(BedrockPacket p) {
+        if (dropGeyserUiText(p)) return;
         stripGeyserCommands(p);
         real.sendPacket(rewrite(p));
         hook(p, false);
     }
 
     @Override public void sendPacketImmediately(BedrockPacket p) {
+        if (dropGeyserUiText(p)) return;
         stripGeyserCommands(p);
         real.sendPacketImmediately(rewrite(p));
         hook(p, true);
@@ -76,6 +85,19 @@ public class SpoofedUpstream extends UpstreamSession {
                     + available.getCommands().size() + " 个");
             }
         }
+    }
+
+    /**
+     * 丢弃 Geyser 用来驱动 JSON UI 的 TIP 文本（如 <code>geyseropt:cooldown:non</code>）。
+     * 网易客户端会把这些文本原样渲染出来（表现为屏幕下方出现 "geyser:cooldown:non" 之类的提示）。
+     */
+    private static boolean dropGeyserUiText(BedrockPacket p) {
+        if (!(p instanceof TextPacket text)) return false;
+        if (text.getType() != TextPacket.Type.TIP) return false;
+        String message = text.getMessage();
+        if (message == null || !message.startsWith(GEYSER_UI_TEXT_PREFIX)) return false;
+        NeteaseExtension.debug("[netease] 已丢弃 JSON UI 文本: " + message);
+        return true;
     }
 
     private BedrockPacket rewrite(BedrockPacket p) {
