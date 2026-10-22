@@ -8,10 +8,17 @@ import org.cloudburstmc.protocol.bedrock.codec.v766.serializer.PlayerAuthInputSe
 import org.cloudburstmc.protocol.bedrock.data.PlayerAuthInputData;
 import org.cloudburstmc.protocol.bedrock.data.PlayerBlockActionData;
 import org.cloudburstmc.protocol.bedrock.packet.PlayerAuthInputPacket;
+import org.cloudburstmc.protocol.common.util.Preconditions;
 import org.cloudburstmc.protocol.common.util.VarInts;
 
 public class PlayerAuthInputSerializer_v766_NetEase extends PlayerAuthInputSerializer_v766 {
     public static final PlayerAuthInputSerializer_v766_NetEase INSTANCE = new PlayerAuthInputSerializer_v766_NetEase();
+
+    /** 越界索引会抛 IllegalArgumentException（畸形包直接断开），而不是 ArrayIndexOutOfBoundsException。 */
+    private static <T> T readEnumSafe(T[] values, int index, String what) {
+        Preconditions.checkArgument(index >= 0 && index < values.length, "Invalid " + what + " index: " + index);
+        return values[index];
+    }
 
     @Override
     public void serialize(ByteBuf buffer, BedrockCodecHelper helper, PlayerAuthInputPacket packet) {
@@ -68,8 +75,8 @@ public class PlayerAuthInputSerializer_v766_NetEase extends PlayerAuthInputSeria
         float z = buffer.readFloatLE();
         packet.setRotation(Vector3f.from(x, y, z));
         helper.readLargeVarIntFlags(buffer, packet.getInputData(), PlayerAuthInputData.class);
-        packet.setInputMode(INPUT_MODES[VarInts.readUnsignedInt(buffer)]);
-        packet.setPlayMode(CLIENT_PLAY_MODES[VarInts.readUnsignedInt(buffer)]);
+        packet.setInputMode(readEnumSafe(INPUT_MODES, VarInts.readUnsignedInt(buffer), "input mode"));
+        packet.setPlayMode(readEnumSafe(CLIENT_PLAY_MODES, VarInts.readUnsignedInt(buffer), "play mode"));
         readInteractionModel(buffer, helper, packet);
         packet.setInteractRotation(helper.readVector2f(buffer));
         packet.setTick(VarInts.readUnsignedLong(buffer));

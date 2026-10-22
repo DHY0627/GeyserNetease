@@ -166,15 +166,17 @@ public class NetEaseUpstreamHandler extends UpstreamHandlerBase {
         for (int i = 0; blockMappings.getDefinition(i) != null; i++) maxId = i;
         int[] rtToHash = new int[maxId + 1];
         boolean[] hValid = new boolean[maxId + 1];
-        for (int i = 0; i <= maxId; i++) {
-            var block = blockMappings.getDefinition(i);
-            if (block != null) {
-                var gb = (org.geysermc.geyser.registry.type.GeyserBedrockBlock) block;
-                if (gb.getState() != null) {
+        try {
+            for (int i = 0; i <= maxId; i++) {
+                var block = blockMappings.getDefinition(i);
+                if (block instanceof org.geysermc.geyser.registry.type.GeyserBedrockBlock gb && gb.getState() != null) {
                     rtToHash[i] = nc.geyserext.netease.util.BlockHashUtils.fnv1a32Nbt(gb.getState());
                     hValid[i] = true;
                 }
             }
+        } catch (Throwable t) {
+            // 单个方块定义异常不应影响整局游戏，保留已构建的部分哈希表。
+            NeteaseExtension.LOG.error("Block hash table build failed", t);
         }
 
         try {
@@ -298,15 +300,21 @@ public class NetEaseUpstreamHandler extends UpstreamHandlerBase {
             List<InventoryActionData> actions = packet.getActions();
             InventoryActionData action0 = actions.get(0);
             InventoryActionData action1 = actions.get(1);
-            InventoryActionData worldAction = action0.getSource().getType() == InventorySource.Type.WORLD_INTERACTION ? action0 : action1;
+            // source / toItem 都由客户端数据构造，畸形包可能为 null，先判空再取字段。
+            InventorySource source0 = action0.getSource();
+            InventorySource source1 = action1.getSource();
+            if (source0 == null || source1 == null) return defaultHandler(packet);
+            InventoryActionData worldAction = source0.getType() == InventorySource.Type.WORLD_INTERACTION ? action0 : action1;
             InventoryActionData containerAction = (worldAction == action0) ? action1 : action0;
             if (worldAction.getSource().getType() != InventorySource.Type.WORLD_INTERACTION
                     || containerAction.getSource().getType() != InventorySource.Type.CONTAINER)
                 return defaultHandler(packet);
 
+            if (worldAction.getToItem() == null) return defaultHandler(packet);
             boolean dropAll = worldAction.getToItem().getCount() > 1;
             var inventory = session.getPlayerInventory();
-            if (inventory.getItemInHand().isEmpty()) return PacketSignal.HANDLED;
+            if (inventory == null || inventory.getItemInHand() == null || inventory.getItemInHand().isEmpty())
+                return PacketSignal.HANDLED;
 
             session.sendDownstreamGamePacket(new ServerboundPlayerActionPacket(
                 dropAll ? PlayerAction.DROP_ITEM_STACK : PlayerAction.DROP_ITEM, Vector3i.ZERO, Direction.DOWN, 0));

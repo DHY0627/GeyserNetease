@@ -4,9 +4,13 @@ import io.netty.buffer.ByteBuf;
 import org.cloudburstmc.protocol.bedrock.codec.BedrockCodecHelper;
 import org.cloudburstmc.protocol.bedrock.codec.BedrockPacketSerializer;
 import org.cloudburstmc.protocol.bedrock.packet.ConfirmSkinPacket;
+import org.cloudburstmc.protocol.common.util.VarInts;
 
 public class ConfirmSkinSerializer implements BedrockPacketSerializer<ConfirmSkinPacket> {
     public static final ConfirmSkinSerializer INSTANCE = new ConfirmSkinSerializer();
+
+    /** 单个 ConfirmSkin 包允许的最大条目数（一次确认的皮肤数量远小于此值）。 */
+    private static final int MAX_ENTRIES = 64;
 
     @Override
     public void serialize(ByteBuf buffer, BedrockCodecHelper helper, ConfirmSkinPacket packet) {
@@ -29,13 +33,14 @@ public class ConfirmSkinSerializer implements BedrockPacketSerializer<ConfirmSki
 
     @Override
     public void deserialize(ByteBuf buffer, BedrockCodecHelper helper, ConfirmSkinPacket packet) {
-        helper.readArray(buffer, packet.getEntries(), (buf, h) -> {
+        // 条目数由客户端控制，必须限定上限，否则后续按条目数循环 readString 会被畸形包放大。
+        helper.readArray(buffer, packet.getEntries(), VarInts::readUnsignedInt, (buf, h) -> {
             ConfirmSkinPacket.SkinEntry entry = new ConfirmSkinPacket.SkinEntry();
             entry.setValid(buf.readBoolean());
             entry.setUuid(h.readUuid(buf));
             entry.setSkinBytes(h.readByteArray(buf));
             return entry;
-        });
+        }, MAX_ENTRIES);
 
         for (ConfirmSkinPacket.SkinEntry entry : packet.getEntries()) {
             entry.setUidStr(helper.readString(buffer));

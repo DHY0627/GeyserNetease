@@ -6,12 +6,16 @@ import org.cloudburstmc.protocol.bedrock.codec.BedrockCodecHelper;
 import org.cloudburstmc.protocol.bedrock.codec.v407.serializer.PlayerEnchantOptionsSerializer_v407;
 import org.cloudburstmc.protocol.bedrock.data.inventory.EnchantData;
 import org.cloudburstmc.protocol.bedrock.data.inventory.EnchantOptionData;
+import org.cloudburstmc.protocol.common.util.Preconditions;
 import org.cloudburstmc.protocol.common.util.VarInts;
 
 import java.util.List;
 
 public class PlayerEnchantOptionsSerializer_v407_NetEase extends PlayerEnchantOptionsSerializer_v407 {
     public static final PlayerEnchantOptionsSerializer_v407_NetEase INSTANCE = new PlayerEnchantOptionsSerializer_v407_NetEase();
+
+    /** 单次可下发/接收的附魔选项上限，仅用于拦截畸形包。 */
+    private static final int MAX_CUSTOM_ENCHANTS = 256;
 
     @Override
     protected void writeOption(ByteBuf buffer, BedrockCodecHelper helper, EnchantOptionData option) {
@@ -36,6 +40,9 @@ public class PlayerEnchantOptionsSerializer_v407_NetEase extends PlayerEnchantOp
         List<EnchantData> enchants2 = new ObjectArrayList<>();
         helper.readArray(buffer, enchants2, b -> deserializeEnchant(b, helper));
         int customCount = VarInts.readUnsignedInt(buffer);
+        // customCount 由客户端控制，原先无上限（可达 2^31-1），畸形包会让这里长时间循环。
+        Preconditions.checkArgument(customCount >= 0 && customCount <= MAX_CUSTOM_ENCHANTS,
+                "Too many custom enchant options: " + customCount);
         for (int i = 0; i < customCount; i++) {
             deserializeEnchant(buffer, helper);
         }

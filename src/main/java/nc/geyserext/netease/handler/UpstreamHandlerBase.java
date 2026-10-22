@@ -6,6 +6,7 @@
 package nc.geyserext.netease.handler;
 
 import io.netty.buffer.Unpooled;
+import nc.geyserext.netease.NeteaseExtension;
 import org.cloudburstmc.math.vector.Vector2f;
 import org.cloudburstmc.protocol.bedrock.BedrockDisconnectReasons;
 import org.cloudburstmc.protocol.bedrock.codec.BedrockCodec;
@@ -170,7 +171,15 @@ public class UpstreamHandlerBase extends LoggingPacketHandler {
         }
         receivedLoginPacket = true;
 
-        LoginEncryptionUtils.encryptPlayerConnection(session, loginPacket);
+        try {
+            LoginEncryptionUtils.encryptPlayerConnection(session, loginPacket);
+        } catch (Exception e) {
+            // 畸形登录链（缺失/非法的 identityPublicKey 等）会在这里抛异常，属于恶意构造，直接断开。
+            NeteaseExtension.LOG.error("Login encryption failed", e);
+            session.disconnect("disconnectionScreen.internalError.cantConnect");
+            session.forciblyCloseUpstream();
+            return PacketSignal.HANDLED;
+        }
 
         if (session.isClosed()) {
             session.forciblyCloseUpstream();
@@ -248,7 +257,8 @@ public class UpstreamHandlerBase extends LoggingPacketHandler {
                 ResourcePackStackPacket stackPacket = new ResourcePackStackPacket();
                 stackPacket.setExperimentsPreviouslyToggled(false);
                 stackPacket.setForcedToAccept(false);
-                stackPacket.setGameVersion(session.getClientData().getGameVersion());
+                stackPacket.setGameVersion(session.getClientData() != null
+                        ? session.getClientData().getGameVersion() : "1.21.40");
                 stackPacket.getResourcePacks().addAll(this.resourcePackLoadEvent.orderedPacks());
 
                 session.sendUpstreamPacket(stackPacket);
@@ -268,7 +278,14 @@ public class UpstreamHandlerBase extends LoggingPacketHandler {
         if (session.getUpstream().isClosed() || session.isClosed()) {
             return PacketSignal.HANDLED;
         }
-        session.executeInEventLoop(() -> session.getFormCache().handleResponse(packet));
+        session.executeInEventLoop(() -> {
+            try {
+                session.getFormCache().handleResponse(packet);
+            } catch (Throwable t) {
+                // 表单响应里的 JSON 由客户端提供，畸形内容会在这里抛异常；记录并忽略，避免打爆事件循环。
+                NeteaseExtension.LOG.error("Invalid form response from " + session.bedrockUsername(), t);
+            }
+        });
         return PacketSignal.HANDLED;
     }
 
@@ -291,7 +308,8 @@ public class UpstreamHandlerBase extends LoggingPacketHandler {
 
     @Override
     public PacketSignal handle(PlayerAuthInputPacket packet) {
-        if (!session.isClosed() && session.isLoggingIn() && !packet.getMotion().equals(Vector2f.ZERO)) {
+        if (!session.isClosed() && session.isLoggingIn() && packet.getMotion() != null
+                && !packet.getMotion().equals(Vector2f.ZERO)) {
             SetTitlePacket titlePacket = new SetTitlePacket();
             titlePacket.setType(SetTitlePacket.Type.ACTIONBAR);
             titlePacket.setText(GeyserLocale.getPlayerLocaleString("geyser.auth.login.wait", session.locale()));
@@ -348,22 +366,34 @@ public class UpstreamHandlerBase extends LoggingPacketHandler {
             return;
         }
 
+        int chunkIndex = packet.getChunkIndex();
+        long offsetLong = (long) chunkIndex * GeyserResourcePack.CHUNK_SIZE;
+        // chunkIndex 完全由客户端控制：负值或越界会让 channel.position 抛异常并中断连接处理，
+        // 属恶意构造，按资源包错误直接断开。
+        if (chunkIndex < 0 || offsetLong > codec.size()) {
+            GeyserImpl.getInstance().getLogger().debug("Client %s requested invalid pack chunk index %s (pack size %s)",
+                session.bedrockUsername(), chunkIndex, codec.size());
+            chunkRequestQueue.clear();
+            session.disconnect("disconnectionScreen.resourcePack");
+            return;
+        }
+
         ResourcePackChunkDataPacket data = new ResourcePackChunkDataPacket();
-        data.setChunkIndex(packet.getChunkIndex());
-        data.setProgress((long) packet.getChunkIndex() * GeyserResourcePack.CHUNK_SIZE);
+        data.setChunkIndex(chunkIndex);
+        data.setProgress(offsetLong);
         data.setPackVersion(packet.getPackVersion());
         data.setPackId(packet.getPackId());
 
-        int offset = packet.getChunkIndex() * GeyserResourcePack.CHUNK_SIZE;
+        int offset = (int) offsetLong;
         long remainingSize = codec.size() - offset;
         byte[] packData = new byte[(int) MathUtils.constrain(remainingSize, 0, GeyserResourcePack.CHUNK_SIZE)];
 
         try (SeekableByteChannel channel = codec.serialize()) {
             channel.position(offset);
             channel.read(ByteBuffer.wrap(packData, 0, packData.length));
-        } catch (IOException e) {
+        } catch (Exception e) {
             session.disconnect("disconnectionScreen.resourcePack");
-            e.printStackTrace();
+            GeyserImpl.getInstance().getLogger().error("Resource pack chunk read failed", e);
         }
 
         data.setData(Unpooled.wrappedBuffer(packData));

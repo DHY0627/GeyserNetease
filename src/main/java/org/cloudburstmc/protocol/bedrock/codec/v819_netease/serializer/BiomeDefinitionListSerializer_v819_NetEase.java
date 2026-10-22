@@ -16,6 +16,9 @@ import java.util.List;
 public class BiomeDefinitionListSerializer_v819_NetEase extends BiomeDefinitionListSerializer_v800 {
     public static final BiomeDefinitionListSerializer_v819_NetEase INSTANCE = new BiomeDefinitionListSerializer_v819_NetEase();
 
+    /** 单个生物群系允许的最大 tag 数（远大于任何正常数据，仅用于拦截畸形包）。 */
+    private static final int MAX_TAGS_PER_BIOME = 4096;
+
     @Override
     protected BiomeDefinitionData readDefinition(ByteBuf buffer, BedrockCodecHelper helper, List<String> strings) {
         Integer id = readDefinitionId(buffer, helper);
@@ -34,10 +37,16 @@ public class BiomeDefinitionListSerializer_v819_NetEase extends BiomeDefinitionL
 
         List<String> tags = helper.readOptional(buffer, null, byteBuf -> {
             int length = VarInts.readUnsignedInt(byteBuf);
+            // 防御畸形包：length 由客户端控制，原先 length * 2 会整数溢出（负值使 isReadable 恒真），
+            // 随后 new ArrayList<>(length) 直接按该值预分配 → 远程 OOM。这里先做范围校验。
+            Preconditions.checkArgument(length >= 0 && length <= MAX_TAGS_PER_BIOME,
+                    "Too many biome tags: " + length);
             Preconditions.checkArgument(byteBuf.isReadable(length * 2), "Not enough readable bytes for tags");
-            List<String> tagList = new ArrayList<>(length);
+            List<String> tagList = new ArrayList<>(Math.min(length, 16));
             for (int i = 0; i < length; i++) {
-                tagList.add(strings.get(byteBuf.readUnsignedShortLE()));
+                int index = byteBuf.readUnsignedShortLE();
+                Preconditions.checkArgument(index < strings.size(), "Invalid biome tag string index: " + index);
+                tagList.add(strings.get(index));
             }
             return tagList;
         });
