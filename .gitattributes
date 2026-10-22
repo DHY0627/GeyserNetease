@@ -13,6 +13,7 @@
 *.properties text eol=lf
 gradlew     text eol=lf
 gradlew.bat text eol=crlf
+*.sh        text eol=lf
 
 # 二进制不做文本转换
 *.jar   binary
