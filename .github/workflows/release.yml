@@ -60,8 +60,10 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add build.gradle.kts src/main/resources/extension.yml
           git commit -m "chore(release): v$VERSION"
-          git tag "v$VERSION"
-          git push origin main --follow-tags
+          # 用 annotated tag（-a），否则 --follow-tags 不会推送它
+          git tag -a "v$VERSION" -m "Release v$VERSION"
+          git push origin main
+          git push origin "refs/tags/v$VERSION"
 
       - name: 创建 GitHub Release
         if: steps.version.outputs.skip != 'true'
