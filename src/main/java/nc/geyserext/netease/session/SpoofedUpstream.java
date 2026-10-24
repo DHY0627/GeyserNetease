@@ -12,7 +12,6 @@ import org.cloudburstmc.protocol.bedrock.BedrockServerSession;
 import org.cloudburstmc.protocol.bedrock.data.definitions.BlockDefinition;
 import org.cloudburstmc.protocol.bedrock.data.skin.SerializedSkin;
 import org.cloudburstmc.protocol.bedrock.packet.*;
-import org.geysermc.geyser.network.bedrock.GameProtocol;
 import org.geysermc.geyser.registry.type.BlockMappings;
 import org.geysermc.geyser.registry.type.GeyserBedrockBlock;
 import org.geysermc.geyser.session.UpstreamSession;
@@ -33,7 +32,6 @@ public class SpoofedUpstream extends UpstreamSession {
     private static final String GEYSER_UI_TEXT_PREFIX = "geyseropt:";
 
     private final UpstreamSession real;
-    private final int spoofedVersion;
     private final int[] rtToHash;
     private final boolean[] hValid;
     private final boolean hashing;
@@ -44,7 +42,6 @@ public class SpoofedUpstream extends UpstreamSession {
             int[] rt, boolean[] hv, boolean hashing, long neteaseUid) {
         super(s);
         this.real = real;
-        this.spoofedVersion = GameProtocol.DEFAULT_BEDROCK_PROTOCOL;
         this.rtToHash = rt;
         this.hValid = hv;
         this.hashing = hashing;
@@ -52,11 +49,11 @@ public class SpoofedUpstream extends UpstreamSession {
     }
 
     @Override public void disconnect(String r) { real.disconnect(r); }
-    @Override public int getProtocolVersion() { return spoofedVersion; }
     @Override public BedrockServerSession getSession() { return real.getSession(); }
     @Override public boolean isClosed() { return real.isClosed(); }
 
     @Override public void sendPacket(BedrockPacket p) {
+        if (skipUnknownPacket(p)) return;
         if (dropGeyserUiText(p)) return;
         stripGeyserCommands(p);
         real.sendPacket(rewrite(p));
@@ -64,10 +61,35 @@ public class SpoofedUpstream extends UpstreamSession {
     }
 
     @Override public void sendPacketImmediately(BedrockPacket p) {
+        if (skipUnknownPacket(p)) return;
         if (dropGeyserUiText(p)) return;
         stripGeyserCommands(p);
         real.sendPacketImmediately(rewrite(p));
         hook(p, true);
+    }
+
+    /** 已警告过"当前 codec 不认识"的包类型，避免同类包把日志刷爆。 */
+    private final Set<Class<?>> unknownPacketWarned = new HashSet<>();
+
+    /**
+     * 双保险：正常情况下 {@link #getProtocolVersion()} 直接取真实 codec 版本，Geyser 不会发当前
+     * codec 里没有的包。但若将来 Geyser 换版本、或某个包没在网易 codec 中注册，
+     * 编码阶段会抛 {@code NullPointerException: getPacketDefinition(...) is null} 并直接踢掉玩家
+     * （表现为 "Exception caught in session of ..."，随后与 Java 服断开）。
+     * 这类包不能硬发，只能跳过并记一条日志，保证玩家还能继续游玩。
+     */
+    private boolean skipUnknownPacket(BedrockPacket p) {
+        BedrockServerSession s = real.getSession();
+        if (s == null) return false;
+        var codec = s.getCodec();
+        if (codec == null || codec.getPacketDefinition(p.getClass()) != null) return false;
+        if (unknownPacketWarned.add(p.getClass())) {
+            NeteaseExtension.LOG.warning("[netease] 当前 codec(v" + codec.getProtocolVersion()
+                + ") 未注册包 " + p.getClass().getSimpleName()
+                + "，已跳过（Geyser 版本与本扩展的 bedrock-codec 版本可能不一致）");
+        }
+        NeteaseExtension.debug("[netease] 已跳过未注册包: " + p.getClass().getSimpleName());
+        return true;
     }
 
     /**
