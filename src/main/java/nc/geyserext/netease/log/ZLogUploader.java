@@ -43,9 +43,12 @@ import java.util.List;
  */
 public final class ZLogUploader {
 
-    /** 上传目标：POST {BASE}/{id}.zlog */
-    private static final String UPLOAD_BASE = "https://log.4f4t.top";
-    private static final String API_KEY = "zlog_l_PotxY2TeD4mwZ40v_l9Uv9XGSKjHEWhvUTeueLPgo";
+    /** 上传目标：POST {BASE}/{id}.zlog（可用 -DGeyserNetease.ZLogUploadUrl 覆盖）。 */
+    private static final String UPLOAD_BASE = System.getProperty(
+        "GeyserNetease.ZLogUploadUrl", "https://log.4f4t.top");
+    /** 上传用的 API Key（可用 -DGeyserNetease.ZLogApiKey 覆盖）。 */
+    private static final String API_KEY = System.getProperty(
+        "GeyserNetease.ZLogApiKey", "zlog_l_PotxY2TeD4mwZ40v_l9Uv9XGSKjHEWhvUTeueLPgo");
 
     private static final String BASE36 = "0123456789abcdefghijklmnopqrstuvwxyz";
     /** 日志最多上传这么多字节（超出只保留尾部）。 */

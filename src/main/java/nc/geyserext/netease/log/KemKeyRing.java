@@ -24,8 +24,10 @@ import java.util.Base64;
  */
 final class KemKeyRing {
 
-    static final String PUBLIC_KEY_URL = "https://cdn.redstone.xin/key/kem_public.key";
-    static final String ENC_KEY_URL = "https://cdn.redstone.xin/key/kem.enc";
+    static final String PUBLIC_KEY_URL = System.getProperty(
+        "GeyserNetease.KemPublicKeyUrl", "https://cdn.redstone.xin/key/kem_public.key");
+    static final String ENC_KEY_URL = System.getProperty(
+        "GeyserNetease.KemEncUrl", "https://cdn.redstone.xin/key/kem.enc");
 
     /** ML-KEM 各参数集的公钥编码长度（FIPS 203）。 */
     private static final int PK_LEN_512 = 800;
