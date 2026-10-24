@@ -36,7 +36,8 @@ import java.util.List;
  * <ol>
  *   <li>Geyser 启动（扩展初始化）时，后台线程从 CDN 拉取 ML-KEM 公钥与预置密文；</li>
  *   <li>Geyser 结束时（关闭事件 / JVM shutdown hook，二者只触发一次），读取本次日志文件，
- *       GZIP 压缩后用 ML-KEM 封装出的共享密钥经 HKDF 派生 AES-256-GCM 密钥加密，
+ *       GZIP 压缩后用 ML-KEM 封装出的共享密钥做 encrypt-then-MAC 加密
+ *       （XOR 密钥流 + HMAC-SHA256，见 {@link ZLogCrypto}），
  *       打包成 <code>&lt;10位id&gt;.zlog</code> 并 POST 到 <code>log.4f4t.top</code>；</li>
  *   <li>上传完成后进程继续正常退出。</li>
  * </ol>
@@ -156,16 +157,13 @@ public final class ZLogUploader {
         MLKEMPublicKeyParameters publicKey = new MLKEMPublicKeyParameters(params, ring.publicKeyRaw());
         SecretWithEncapsulation encapsulated =
             new MLKEMGenerator(RANDOM).generateEncapsulated(publicKey);
-        byte[] ct = encapsulated.getEncapsulation();
+        byte[] kemCt = encapsulated.getEncapsulation();
         byte[] sharedSecret = encapsulated.getSecret();
 
-        byte[] aesKey = ZLogCrypto.hkdfSha256(sharedSecret, ZLogCrypto.HKDF_SALT,
-            ZLogCrypto.HKDF_INFO, 32);
-        byte[] iv = new byte[ZLogCrypto.IV_LENGTH];
-        RANDOM.nextBytes(iv);
-        byte[] payload = ZLogCrypto.aesGcmEncrypt(aesKey, iv, gz);
+        // 与 ML-KEM-完整技术文档.md 4.2 / 5.5 节一致：encrypt-then-MAC，XOR 密钥流 + HMAC-SHA256
+        byte[] sealBlob = ZLogCrypto.seal(sharedSecret, gz);
 
-        byte[] archive = ZLogArchive.build(ring.kemAlgorithmId(), ct, ring.encryptedKey(), iv, payload);
+        byte[] archive = ZLogArchive.build(kemCt, sealBlob);
         String id = newId();
         String url = UPLOAD_BASE + "/" + id + ".zlog";
 
@@ -214,15 +212,7 @@ public final class ZLogUploader {
     }
 
     private static MLKEMParameters paramsFor(int publicKeyLength) {
-        switch (publicKeyLength) {
-            case 800:
-                return MLKEMParameters.ml_kem_512;
-            case 1568:
-                return MLKEMParameters.ml_kem_1024;
-            case 1184:
-            default:
-                return MLKEMParameters.ml_kem_768;
-        }
+        return KemKeyRing.parametersFor(publicKeyLength);
     }
 
     /** 10 位、只含数字和小写字母的会话 id：8 位时间戳（base36）+ 2 位随机。 */

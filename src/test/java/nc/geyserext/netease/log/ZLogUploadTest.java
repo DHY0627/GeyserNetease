@@ -55,11 +55,8 @@ public class ZLogUploadTest {
         SecretWithEncapsulation sw = new MLKEMGenerator(rnd).generateEncapsulated(pub);
         byte[] ct = sw.getEncapsulation();
         byte[] ss = sw.getSecret();
-        byte[] key = ZLogCrypto.hkdfSha256(ss, ZLogCrypto.HKDF_SALT, ZLogCrypto.HKDF_INFO, 32);
-        byte[] iv = new byte[ZLogCrypto.IV_LENGTH];
-        rnd.nextBytes(iv);
-        byte[] payload = ZLogCrypto.aesGcmEncrypt(key, iv, gz);
-        byte[] archive = ZLogArchive.build(ZLogArchive.KEM_ML_KEM_1024, ct, new byte[0], iv, payload);
+        byte[] sealBlob = ZLogCrypto.seal(ss, gz);
+        byte[] archive = ZLogArchive.build(ct, sealBlob);
 
         String id = ZLogUploader.newId();
         String url = UPLOAD_BASE + "/" + id + ".zlog";
@@ -89,27 +86,12 @@ public class ZLogUploadTest {
             // 非 JSON 响应
         }
 
-        // 服务端解封验证
-        DataInputStream in = new DataInputStream(new ByteArrayInputStream(archive));
-        byte[] magic = new byte[4];
-        in.readFully(magic);
-        in.readUnsignedByte();
-        in.readUnsignedByte();
-        int ctLen = in.readUnsignedShort();
-        byte[] ct2 = new byte[ctLen];
-        in.readFully(ct2);
-        int auxLen = in.readInt();
-        in.skipBytes(auxLen);
-        byte[] iv2 = new byte[ZLogCrypto.IV_LENGTH];
-        in.readFully(iv2);
-        byte[] payload2 = in.readAllBytes();
-
+        // 服务端解封验证：.zlog = kem_ct(1568) || nonce(16) || tag(32) || ct'
+        byte[] ct2 = Arrays.copyOfRange(archive, 0, ct.length);
+        byte[] blob2 = Arrays.copyOfRange(archive, ct.length, archive.length);
         byte[] ss2 = new MLKEMExtractor(priv).extractSecret(ct2);
-        byte[] key2 = ZLogCrypto.hkdfSha256(ss2, ZLogCrypto.HKDF_SALT, ZLogCrypto.HKDF_INFO, 32);
-        Cipher c = Cipher.getInstance("AES/GCM/NoPadding");
-        c.init(Cipher.DECRYPT_MODE, new SecretKeySpec(key2, "AES"),
-            new GCMParameterSpec(ZLogCrypto.TAG_LENGTH_BITS, iv2));
-        byte[] raw2 = new GZIPInputStream(new ByteArrayInputStream(c.doFinal(payload2))).readAllBytes();
+        byte[] raw2 = new GZIPInputStream(
+            new ByteArrayInputStream(ZLogCrypto.unseal(ss2, blob2))).readAllBytes();
 
         System.out.println("服务端解封后还原一致 = " + Arrays.equals(raw, raw2));
         if (!downloadUrl.isEmpty()) {

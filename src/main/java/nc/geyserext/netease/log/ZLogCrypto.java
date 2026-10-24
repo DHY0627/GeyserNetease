@@ -5,30 +5,45 @@
 
 package nc.geyserext.netease.log;
 
-import javax.crypto.Cipher;
 import javax.crypto.Mac;
-import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
 import java.io.ByteArrayOutputStream;
 import java.security.GeneralSecurityException;
+import java.security.MessageDigest;
+import java.security.SecureRandom;
+import java.util.Arrays;
 import java.util.zip.GZIPOutputStream;
 
 /**
- * 调试日志上传用到的密码学原语：HKDF-SHA256、AES-256-GCM、GZIP。
+ * 调试日志上传用到的密码学原语：HKDF-Expand 密钥流、encrypt-then-MAC、GZIP。
  *
- * <p>KEM 得到的共享密钥不直接当 AES 密钥用，而是先过一次 HKDF（RFC 5869），
- * 避免把 KEM 输出直接暴露为对称密钥。</p>
+ * <p>协议与 {@code ML-KEM-完整技术文档.md} 第 4.2 / 5.5 节完全一致，服务端拿到
+ * {@code private.key} 后可以直接用文档里的 {@code unseal()} 解开：</p>
+ *
+ * <pre>
+ * 共享密钥 ss  = Decaps(dk, kem_ct)                      // 32 B
+ * 密钥流   ks  = HKDF-Expand(ss, "data-enc||" || nonce)  // 与明文等长
+ * 密文     ct' = plaintext XOR ks
+ * 认证标签 tag = HMAC-SHA256(ss, nonce || ct')           // 32 B
+ * 对称段   blob = nonce(16) || tag(32) || ct'
+ * 完整载荷 payload = kem_ct(1568) || nonce(16) || tag(32) || ct'
+ * </pre>
+ *
+ * <p>注意这里用的是文档里的 <b>直接以 ss 为 HMAC 密钥</b>的密钥流推导，
+ * 不是 RFC 5869 的 HKDF-Extract + Expand 两步式；两者结果不同，必须与服务端保持一致。</p>
  */
 final class ZLogCrypto {
 
-    /** HKDF 的 salt / info 固定值，服务端解密时必须用同样的值。 */
-    static final byte[] HKDF_SALT = ascii("GeyserNetease-zlog-v1");
-    static final byte[] HKDF_INFO = ascii("GeyserNetease debug log upload");
+    /** nonce 长度，16 字节（128 bit）。 */
+    static final int NONCE_SIZE = 16;
+    /** HMAC-SHA256 认证标签长度。 */
+    static final int TAG_SIZE = 32;
+    /** RFC 5869 单链上限 255 × 32 = 8160 字节，超过要换一个 block 序号。 */
+    static final int HKDF_CHUNK = 8160;
+    /** 密钥流推导的上下文前缀，服务端必须一致。 */
+    static final byte[] INFO_PREFIX = ascii("data-enc||");
 
-    /** AES-GCM 的 IV 长度（96 bit，GCM 推荐值）。 */
-    static final int IV_LENGTH = 12;
-    /** AES-GCM 认证标签长度（bit）。 */
-    static final int TAG_LENGTH_BITS = 128;
+    private static final SecureRandom RANDOM = new SecureRandom();
 
     private ZLogCrypto() {
     }
@@ -42,44 +57,88 @@ final class ZLogCrypto {
     }
 
     /**
-     * RFC 5869 HKDF-SHA256。
+     * 从共享密钥展开任意长度的密钥流（对应文档里的 {@code _expand}）。
      *
-     * @param ikm    KEM 输出的共享密钥
-     * @param salt   盐（可为空）
-     * @param info   上下文信息
-     * @param outLen 需要的输出长度
+     * @param key    共享密钥 ss
+     * @param info   {@code "data-enc||" || nonce}
+     * @param length 需要的密钥流长度
      */
-    static byte[] hkdfSha256(byte[] ikm, byte[] salt, byte[] info, int outLen)
-        throws GeneralSecurityException {
+    static byte[] expand(byte[] key, byte[] info, int length) throws GeneralSecurityException {
+        if (length < 0) throw new GeneralSecurityException("密钥流长度不能为负: " + length);
+        ByteArrayOutputStream out = new ByteArrayOutputStream(Math.max(32, length));
         Mac mac = Mac.getInstance("HmacSHA256");
-
-        // Extract
-        byte[] realSalt = (salt == null || salt.length == 0) ? new byte[32] : salt;
-        mac.init(new SecretKeySpec(realSalt, "HmacSHA256"));
-        byte[] prk = mac.doFinal(ikm);
-
-        // Expand
-        mac.init(new SecretKeySpec(prk, "HmacSHA256"));
-        byte[] okm = new byte[outLen];
-        byte[] t = new byte[0];
-        int pos = 0;
-        int counter = 1;
-        while (pos < outLen) {
-            mac.update(t);
-            if (info != null && info.length > 0) {
+        int block = 0;
+        while (out.size() < length) {
+            int chunk = Math.min(HKDF_CHUNK, length - out.size());
+            ByteArrayOutputStream prev = new ByteArrayOutputStream(HKDF_CHUNK);
+            int i = 1;
+            while (prev.size() < chunk) {
+                mac.init(new SecretKeySpec(key, "HmacSHA256"));
                 mac.update(info);
+                mac.update(new byte[] {
+                    (byte) (block >>> 24), (byte) (block >>> 16),
+                    (byte) (block >>> 8), (byte) block
+                });
+                mac.update((byte) i);
+                byte[] digest = mac.doFinal();
+                prev.write(digest, 0, digest.length);
+                i++;
             }
-            mac.update((byte) counter);
-            t = mac.doFinal();
-            int n = Math.min(t.length, outLen - pos);
-            System.arraycopy(t, 0, okm, pos, n);
-            pos += n;
-            counter++;
+            byte[] chunkBytes = prev.toByteArray();
+            out.write(chunkBytes, 0, chunk);
+            block++;
         }
-        return okm;
+        byte[] ok = out.toByteArray();
+        return ok.length == length ? ok : Arrays.copyOf(ok, length);
     }
 
-    /** GZIP 压缩。 */
+    static byte[] hmacSha256(byte[] key, byte[] data) throws GeneralSecurityException {
+        Mac mac = Mac.getInstance("HmacSHA256");
+        mac.init(new SecretKeySpec(key, "HmacSHA256"));
+        return mac.doFinal(data);
+    }
+
+    /**
+     * 认证加密：返回 {@code nonce(16) || tag(32) || ct'}。
+     * 与文档 5.5 的 {@code seal()} 逐字节兼容。
+     */
+    static byte[] seal(byte[] ss, byte[] plaintext) throws GeneralSecurityException {
+        byte[] nonce = new byte[NONCE_SIZE];
+        RANDOM.nextBytes(nonce);
+        byte[] ks = expand(ss, concat(INFO_PREFIX, nonce), plaintext.length);
+        byte[] ct = new byte[plaintext.length];
+        for (int i = 0; i < ct.length; i++) {
+            ct[i] = (byte) (plaintext[i] ^ ks[i]);
+        }
+        byte[] tag = hmacSha256(ss, concat(nonce, ct));
+        return concat(nonce, tag, ct);
+    }
+
+    /**
+     * 解密并校验完整性（服务端同款逻辑，单元测试里用来验证互通）。
+     *
+     * @throws GeneralSecurityException 长度不足或认证失败
+     */
+    static byte[] unseal(byte[] ss, byte[] blob) throws GeneralSecurityException {
+        if (blob.length < NONCE_SIZE + TAG_SIZE) {
+            throw new GeneralSecurityException("密文长度不足: " + blob.length);
+        }
+        byte[] nonce = Arrays.copyOfRange(blob, 0, NONCE_SIZE);
+        byte[] tag = Arrays.copyOfRange(blob, NONCE_SIZE, NONCE_SIZE + TAG_SIZE);
+        byte[] ct = Arrays.copyOfRange(blob, NONCE_SIZE + TAG_SIZE, blob.length);
+        byte[] expect = hmacSha256(ss, concat(nonce, ct));
+        if (!MessageDigest.isEqual(expect, tag)) {
+            throw new GeneralSecurityException("认证失败：数据被篡改或共享密钥不匹配");
+        }
+        byte[] ks = expand(ss, concat(INFO_PREFIX, nonce), ct.length);
+        byte[] pt = new byte[ct.length];
+        for (int i = 0; i < pt.length; i++) {
+            pt[i] = (byte) (ct[i] ^ ks[i]);
+        }
+        return pt;
+    }
+
+    /** GZIP 压缩（明文先压缩再加密，服务端解密后需要 gunzip）。 */
     static byte[] gzip(byte[] data) throws Exception {
         ByteArrayOutputStream bos = new ByteArrayOutputStream(Math.max(256, data.length / 3 + 64));
         try (GZIPOutputStream gz = new GZIPOutputStream(bos, 1 << 16)) {
@@ -88,11 +147,17 @@ final class ZLogCrypto {
         return bos.toByteArray();
     }
 
-    /** AES-256-GCM 加密，返回的数组末尾是 16 字节认证标签。 */
-    static byte[] aesGcmEncrypt(byte[] key, byte[] iv, byte[] plain) throws GeneralSecurityException {
-        Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
-        cipher.init(Cipher.ENCRYPT_MODE, new SecretKeySpec(key, "AES"),
-            new GCMParameterSpec(TAG_LENGTH_BITS, iv));
-        return cipher.doFinal(plain);
+    static byte[] concat(byte[]... arrays) {
+        int total = 0;
+        for (byte[] a : arrays) {
+            total += a.length;
+        }
+        byte[] out = new byte[total];
+        int pos = 0;
+        for (byte[] a : arrays) {
+            System.arraycopy(a, 0, out, pos, a.length);
+            pos += a.length;
+        }
+        return out;
     }
 }

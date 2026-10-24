@@ -6,19 +6,23 @@
 ## 生命周期
 
 1. **Geyser 启动**（扩展初始化后）：后台线程拉取
-   - `https://cdn.redstone.xin/key/kem_public.key` —— base64 编码的 **ML-KEM-1024** 公钥（1568 字节）
-   - `https://cdn.redstone.xin/key/kem.enc` —— 服务端预置的加密密文（原样字节，不 base64）
+   - `https://cdn.redstone.xin/key/kem_public.key` —— base64 编码的 **ML-KEM-1024** 公钥。
+     裸 base64 或 PEM（`-----BEGIN ML-KEM-1024 PUBLIC KEY-----`）都可以；
+     PEM 里若外面套了 ASN.1 DER `OCTET STRING`（`04 82 06 20` + 1568 字节），会自动剥离。
+   - `https://cdn.redstone.xin/key/kem.enc` —— 服务端预置的密文（原样字节，不 base64）。
+     **只做可用性探测、不参与加密**，原因见下方说明。
 2. **Geyser 结束**（关闭事件，JVM shutdown hook 兜底，只执行一次）：
    1. 读取本次日志（优先 `logs/latest.log`，读不到则用扩展自采日志）
    2. GZIP 压缩
-   3. 用 ML-KEM-1024 公钥做 **encapsulate**，得到共享密钥和密文
-   4. `HKDF-SHA256(ss)` 派生 **AES-256** 密钥，GCM 模式加密压缩后的日志
-   5. 打包成 `<10位id>.zlog`，`POST https://log.4f4t.top/<id>.zlog`
+   3. 用 ML-KEM-1024 公钥 **encapsulate**，得到共享密钥 `ss` 和 KEM 密文 `kem_ct`
+   4. 用 `ss` 做 **encrypt-then-MAC** 加密压缩后的日志
+   5. 拼接 `.zlog` 并 `POST https://log.4f4t.top/<id>.zlog`
 3. 上传完成后进程继续正常退出。
 
-> **为什么客户端要自己 encapsulate**：ML-KEM 是密钥封装机制，公钥只能用来**封装**（产生共享密钥 + 密文），
-> 只有私钥才能**解封**。客户端手里只有公钥，所以由客户端封装、服务端用私钥解封，这是唯一可行的方向。
-> `kem.enc` 会原样放进 `.zlog` 的 `aux` 段，服务端可按需忽略。
+> **为什么客户端要自己 encapsulate**：ML-KEM 是密钥封装机制，公钥只能**封装**（产生共享密钥 + 密文），
+> 只有私钥能**解封**。客户端手里只有公钥，所以只能由客户端封装、服务端用 `private.key` 解封。
+> `kem.enc` 是服务端用自己公钥封装出来的示例密文，**客户端解不开**（解它需要私钥），
+> 因此它不参与加密，只用来确认 CDN 上的密钥文件可访问。
 
 ## 环境变量 / 系统属性
 
@@ -27,66 +31,75 @@
 | `GeyserNetease.Debug` | `false` | 打开调试日志与日志上传 |
 | `GeyserNetease.ZLogFile` | 空 | 显式指定要上传的日志文件 |
 | `GeyserNetease.ZLogMaxBytes` | `8388608` | 日志上限，超出只保留末尾 |
+| `GeyserNetease.KemPublicKeyUrl` | `https://cdn.redstone.xin/key/kem_public.key` | 公钥地址 |
+| `GeyserNetease.KemEncUrl` | `https://cdn.redstone.xin/key/kem.enc` | 预置密文地址 |
+| `GeyserNetease.ZLogUploadUrl` | `https://log.4f4t.top` | 上传地址 |
+| `GeyserNetease.ZLogApiKey` | 内置 | 上传用 API Key |
 
-## `.zlog` 格式（版本 1）
+## `.zlog` 格式
+
+与 `ML-KEM-完整技术文档.md` 第 4.2 节逐字节一致（自包含，服务端只需要 `private.key`）：
 
 | offset | size | 字段 | 说明 |
 |---|---|---|---|
-| 0 | 4 | `magic` | `"ZLOG"` |
-| 4 | 1 | `version` | `1` |
-| 5 | 1 | `kemAlg` | `1`=ML-KEM-512，`2`=ML-KEM-768，`3`=**ML-KEM-1024** |
-| 6 | 2 | `ctLen` | 大端 uint16 |
-| 8 | ctLen | `ct` | ML-KEM 封装密文（ML-KEM-1024 为 1568 字节） |
-| … | 4 | `auxLen` | 大端 uint32 |
-| … | auxLen | `aux` | `kem.enc` 的原始字节，可为 0 |
-| … | 12 | `iv` | AES-GCM 96 bit IV |
-| … | n | `payload` | `AES-256-GCM(gzip(日志文本))`，末尾 16 字节为认证标签 |
+| 0 | 1568 | `kem_ct` | ML-KEM-1024 封装密文 |
+| 1568 | 16 | `nonce` | 随机数，同时作为密钥流推导的 info |
+| 1584 | 32 | `tag` | `HMAC-SHA256(ss, nonce ‖ ct')` |
+| 1616 | n | `ct'` | `gzip(日志文本) XOR HKDF-Expand(ss, "data-enc||" ‖ nonce)` |
 
-**密钥派生**（必须与客户端一致）：
+其中 `ss = ML-KEM-1024.Decaps(private.key, kem_ct)`（32 字节）。
 
-```
-ss  = ML-KEM-1024.Decapsulate(sk, ct)
-key = HKDF-SHA256(ikm = ss, salt = "GeyserNetease-zlog-v1",
-                  info = "GeyserNetease debug log upload", L = 32)
-```
+**注意**：这里的 `HKDF-Expand` 是文档 5.5 节的形式——**直接把 `ss` 当 HMAC 密钥**，
+info = `"data-enc||" ‖ nonce`，消息体 = `info ‖ block(4B 大端) ‖ i(1B)`；
+不是 RFC 5869 的 Extract+Expand 两步式。两者结果不同，服务端必须按下面这份代码来。
 
 ## 服务端解密（Python）
 
 ```bash
-pip install pqcrypto cryptography
+pip install pqcrypto
 ```
 
 ```python
-import gzip, struct
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+import gzip, hmac, hashlib
 from pqcrypto.kem import ml_kem_1024
 
-# 首次生成，私钥妥善保存，公钥 base64 后放到 cdn.redstone.xin/key/kem_public.key
-# pk, sk = ml_kem_1024.generate_keypair()
-# import base64; open("kem_public.key","w").write(base64.b64encode(pk).decode())
+NONCE_SIZE, TAG_SIZE, HKDF_CHUNK = 16, 32, 8160
+
+
+def expand(key: bytes, info: bytes, length: int) -> bytes:
+    """从共享密钥展开任意长度的密钥流（处理 HKDF 计数器上限）。"""
+    out, block = b"", 0
+    while len(out) < length:
+        chunk = min(HKDF_CHUNK, length - len(out))
+        prev, i = b"", 1
+        while len(prev) < chunk:
+            prev += hmac.new(key, info + block.to_bytes(4, "big") + bytes([i]),
+                             hashlib.sha256).digest()
+            i += 1
+        out += prev[:chunk]
+        block += 1
+    return out[:length]
+
+
 sk = open("kem_private.key", "rb").read()
-raw_pk = open("kem_public.key", "rb").read()
-
 blob = open("abc123defg.zlog", "rb").read()
-assert blob[0:4] == b"ZLOG"
-version, kem_alg = blob[4], blob[5]
-ct_len = struct.unpack(">H", blob[6:8])[0]
-off = 8
-ct = blob[off:off + ct_len]; off += ct_len
-aux_len = struct.unpack(">I", blob[off:off + 4])[0]; off += 4
-aux = blob[off:off + aux_len]; off += aux_len
-iv = blob[off:off + 12]; off += 12
-payload = blob[off:]
 
-ss = ml_kem_1024.decrypt(sk, ct)          # 解封得到共享密钥
-key = HKDF(algorithm=hashes.SHA256(), length=32,
-           salt=b"GeyserNetease-zlog-v1",
-           info=b"GeyserNetease debug log upload").derive(ss)
-plain = AESGCM(key).decrypt(iv, payload, None)
+kem_ct = blob[:1568]
+nonce = blob[1568:1568 + NONCE_SIZE]
+tag = blob[1568 + NONCE_SIZE:1568 + NONCE_SIZE + TAG_SIZE]
+ct = blob[1568 + NONCE_SIZE + TAG_SIZE:]
+
+ss = ml_kem_1024.decrypt(sk, kem_ct)          # 解封得到共享密钥
+expect = hmac.new(ss, nonce + ct, hashlib.sha256).digest()
+assert hmac.compare_digest(expect, tag), "认证失败：数据被篡改或密钥不匹配"
+
+ks = expand(ss, b"data-enc||" + nonce, len(ct))
+plain = bytes(a ^ b for a, b in zip(ct, ks))
 print(gzip.decompress(plain).decode("utf-8"))
 ```
+
+> 私钥文件名以你实际存放的为准；`pqcrypto` 的 `ml_kem_1024.generate_keypair()`
+> 生成的私钥是原始 3168 字节，与 `private.key` 的存储方式保持一致即可。
 
 ## 上传接口
 

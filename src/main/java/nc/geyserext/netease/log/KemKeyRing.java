@@ -5,6 +5,8 @@
 
 package nc.geyserext.netease.log;
 
+import org.bouncycastle.pqc.crypto.mlkem.MLKEMParameters;
+
 import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -50,16 +52,16 @@ final class KemKeyRing {
         return encryptedKey;
     }
 
-    /** 根据公钥长度推断 .zlog 头里该写哪个 KEM 标识。 */
-    byte kemAlgorithmId() {
-        switch (publicKeyRaw.length) {
+    /** 根据公钥长度判断 KEM 参数（.zlog 里不写标识，长度本身就是唯一线索）。 */
+    static MLKEMParameters parametersFor(int publicKeyLength) {
+        switch (publicKeyLength) {
             case PK_LEN_512:
-                return ZLogArchive.KEM_ML_KEM_512;
+                return MLKEMParameters.ml_kem_512;
             case PK_LEN_1024:
-                return ZLogArchive.KEM_ML_KEM_1024;
+                return MLKEMParameters.ml_kem_1024;
             case PK_LEN_768:
             default:
-                return ZLogArchive.KEM_ML_KEM_768;
+                return MLKEMParameters.ml_kem_768;
         }
     }
 
