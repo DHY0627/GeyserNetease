@@ -29,3 +29,9 @@ plugins/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# zlogdecrypt 编译产物（源码保留，二进制不提交）
+tools/zlogdecrypt/zlogdecrypt
+tools/zlogdecrypt/zlogdecrypt.exe
+tools/zlogdecrypt/zlogdecrypt-linux-amd64
+tools/zlogdecrypt/zlogdecrypt-linux-arm64

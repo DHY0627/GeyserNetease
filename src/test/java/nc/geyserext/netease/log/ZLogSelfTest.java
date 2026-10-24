@@ -63,5 +63,16 @@ public class ZLogSelfTest {
         System.out.println("共享密钥一致 = " + Arrays.equals(ss, ss2));
         System.out.println("日志还原一致 = " + Arrays.equals(raw, raw2));
         System.out.println("CKSUM " + (Arrays.equals(raw, raw2) && Arrays.equals(ss, ss2) ? "OK" : "FAIL"));
+
+        // 可选：导出测试向量，供 tools/zlogdecrypt 做跨语言交叉验证
+        if (args.length > 0) {
+            java.nio.file.Path dir = java.nio.file.Paths.get(args[0]);
+            java.nio.file.Files.createDirectories(dir);
+            java.nio.file.Files.write(dir.resolve("test_priv.key"), priv.getEncoded());
+            java.nio.file.Files.write(dir.resolve("test_pub.key"), pk);
+            java.nio.file.Files.write(dir.resolve("test.zlog"), zlog);
+            java.nio.file.Files.write(dir.resolve("test.log"), raw);
+            System.out.println("已导出测试向量到 " + dir.toAbsolutePath());
+        }
     }
 }
