@@ -16,7 +16,7 @@ import org.geysermc.geyser.api.extension.*;
 public class NeteaseExtension implements Extension {
 
     /** 构建标识：用于在服务器日志中确认运行的是哪个版本。 */
-    public static final String BUILD_TAG = "geyser2.11.3-hostnamefix-20261006";
+    public static final String BUILD_TAG = "geyser2.11.3-zlog-20261025";
 
     /** 诊断日志开关：-DGeyserNetease.Debug=true 打开（默认关闭）。 */
     public static final boolean DEBUG =
@@ -56,7 +56,11 @@ public class NeteaseExtension implements Extension {
         }
     }
 
-    /** Geyser 正常关闭时上传本次日志（JVM shutdown hook 作为兜底，两者只生效一次）。 */
+    /**
+     * Geyser 正常关闭时上传本次日志。
+     * 之所以不注册 JVM shutdown hook：Velocity 关服时 hook 会先于本事件执行，
+     * 那一刻扩展的 ClassLoader 已不可用，ML-KEM 相关类首次加载会抛 NoClassDefFoundError。
+     */
     @Subscribe
     public void onShutdown(GeyserShutdownEvent event) {
         if (debugEnabled()) {

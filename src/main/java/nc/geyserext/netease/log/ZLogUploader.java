@@ -81,8 +81,11 @@ public final class ZLogUploader {
         t.setDaemon(true);
         keyFetchThread = t;
         t.start();
-        Runtime.getRuntime().addShutdownHook(new Thread(ZLogUploader::finishQuietly,
-            "GeyserNetease-ZLog-Shutdown"));
+        // 注意：这里**不能**注册 JVM shutdown hook。
+        // Velocity 关闭时 JVM hook 会先于 Geyser 的 GeyserShutdownEvent 执行，
+        // 此时扩展的 ClassLoader 已经不可用，BouncyCastle 的 ML-KEM 类首次加载会抛
+        // NoClassDefFoundError，导致上传必然失败。改为只依赖 GeyserShutdownEvent
+        // （该事件触发时扩展还没被禁用，ClassLoader 与网络都可用）。
         log("ZLog: 调试日志上传已启用，" + KemKeyRing.PUBLIC_KEY_URL + " / " + KemKeyRing.ENC_KEY_URL);
     }
 
@@ -317,7 +320,30 @@ public final class ZLogUploader {
         } catch (Throwable ignored) {
             // 日志系统还没就绪时忽略
         }
+        // 关闭阶段 Geyser 的 logger 可能已经关闭 appender，info 会丢失。
+        // 这里再写一份 stderr + 一个状态文件，保证"上传成功 / 访问地址"一定能看到。
+        System.err.println("[geyser-netease] " + message);
+        appendStatusFile(message);
         tap(message);
+    }
+
+    /** 把关键事件追加到 <code>logs/zlog-status.log</code>，便于关服后回看上传结果。 */
+    private static void appendStatusFile(String message) {
+        try {
+            String base = System.getProperty("user.dir", ".");
+            java.nio.file.Path p = java.nio.file.Path.of(
+                System.getProperty("GeyserNetease.ZLogStatusFile",
+                    base + java.io.File.separator + "logs" + java.io.File.separator + "zlog-status.log"));
+            java.nio.file.Path parent = p.getParent();
+            if (parent != null) {
+                java.nio.file.Files.createDirectories(parent);
+            }
+            String line = java.time.LocalDateTime.now() + " " + message + System.lineSeparator();
+            java.nio.file.Files.writeString(p, line, StandardCharsets.UTF_8,
+                java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.APPEND);
+        } catch (Throwable ignored) {
+            // 状态文件写不了就算了，不影响上传
+        }
     }
 
     private static String truncate(String s, int max) {

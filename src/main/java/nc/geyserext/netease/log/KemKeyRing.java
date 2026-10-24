@@ -89,29 +89,23 @@ final class KemKeyRing {
     private static byte[] fetchPublicKey(HttpClient client, Duration timeout) throws Exception {
         byte[] body = fetchRaw(client, PUBLIC_KEY_URL, timeout);
         String text = new String(body, StandardCharsets.UTF_8);
-        // 公钥文件是 base64；去掉换行/空格/PEM 头尾
+        // 按行处理：跳过空行和 PEM 分隔行（-----BEGIN …----- / -----END …-----），
+        // 其余行的空白字符全部去掉后拼起来就是 base64 正文。
+        // 注意不能简单用 indexOf("END") 截断：base64 正文里本来就可能出现 "END" 三个字母。
         StringBuilder sb = new StringBuilder(text.length());
-        for (int i = 0; i < text.length(); i++) {
-            char c = text.charAt(i);
-            if (c == '-' || c == ' ' || c == '\r' || c == '\n' || c == '\t') {
+        for (String line : text.split("\\R")) {
+            String t = line.trim();
+            if (t.isEmpty() || t.startsWith("-----")) {
                 continue;
             }
-            sb.append(c);
-        }
-        String b64 = sb.toString();
-        // 容忍 "BEGIN ... KEY" 一类的 PEM 头
-        int cut = b64.indexOf("BEGIN");
-        if (cut >= 0) {
-            int end = b64.indexOf("KEY", cut);
-            if (end > 0) {
-                b64 = b64.substring(end + 3);
-            }
-            int idx = b64.indexOf("END");
-            if (idx > 0) {
-                b64 = b64.substring(0, idx);
+            for (int i = 0; i < t.length(); i++) {
+                char c = t.charAt(i);
+                if (c != ' ' && c != '\t') {
+                    sb.append(c);
+                }
             }
         }
-        byte[] decoded = Base64.getDecoder().decode(b64);
+        byte[] decoded = Base64.getDecoder().decode(sb.toString());
         decoded = unwrapDerOctetString(decoded);
         if (decoded.length != PK_LEN_512 && decoded.length != PK_LEN_768
             && decoded.length != PK_LEN_1024) {
