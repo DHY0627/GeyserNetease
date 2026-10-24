@@ -6,9 +6,11 @@
 package nc.geyserext.netease;
 
 import nc.geyserext.netease.config.*;
+import nc.geyserext.netease.log.ZLogUploader;
 import nc.geyserext.netease.util.*;
 import org.geysermc.event.subscribe.Subscribe;
 import org.geysermc.geyser.api.event.lifecycle.GeyserPostInitializeEvent;
+import org.geysermc.geyser.api.event.lifecycle.GeyserShutdownEvent;
 import org.geysermc.geyser.api.extension.*;
 
 public class NeteaseExtension implements Extension {
@@ -26,6 +28,13 @@ public class NeteaseExtension implements Extension {
     /** 诊断日志：仅在 DEBUG 打开时输出。 */
     public static void debug(String message) {
         if (DEBUG && LOG != null) LOG.info(message);
+        // 调试日志上传只采集 debug 输出，作为拿不到 Geyser 日志文件时的兜底
+        ZLogUploader.tap(message);
+    }
+
+    /** debug 是否生效：系统属性 -DGeyserNetease.Debug=true 或配置文件 debug-mode: true。 */
+    public static boolean debugEnabled() {
+        return DEBUG || (CONFIG != null && CONFIG.debugMode());
     }
 
     @Subscribe
@@ -40,5 +49,18 @@ public class NeteaseExtension implements Extension {
             ServerRestartUtil.restart(CONFIG.onlyNeteaseClients());
             LOG.info("NetEase Extension initialized — RakNet v8 clients supported.");
         } catch (Exception e) { LOG.error("Init failed", e); }
+
+        // 调试日志上传：只有 debug 打开时才启用，结束后自动加密上传
+        if (debugEnabled()) {
+            ZLogUploader.init();
+        }
+    }
+
+    /** Geyser 正常关闭时上传本次日志（JVM shutdown hook 作为兜底，两者只生效一次）。 */
+    @Subscribe
+    public void onShutdown(GeyserShutdownEvent event) {
+        if (debugEnabled()) {
+            ZLogUploader.shutdown();
+        }
     }
 }

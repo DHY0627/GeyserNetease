@@ -134,6 +134,19 @@ debug-mode: false
 | `-DGeyserNetease.AsciiJavaName` | `false` | `true` 时 java 侧使用纯 ASCII 登录名（`NE+uid`），Bedrock 侧显示名不变 |
 | `-DGeyserNetease.Sniff` | `false` | `true` 时把 Geyser ↔ 代理 的双向包写入运行目录的 `geyser-netease-java.log`（排错用） |
 | `-DGeyserNetease.Debug` | `false` | `true` 时输出逐连接的诊断日志（网易路径已激活 / 跳过加密握手 / `ServerAddress` 修正 / java 登录名等）。默认静默，只在排查时打开 |
+| `-DGeyserNetease.ZLogFile` | 空 | 调试日志上传时显式指定要上传的日志文件（默认自动找 `logs/latest.log`） |
+| `-DGeyserNetease.ZLogMaxBytes` | `8388608` | 调试日志上传的大小上限，超出只保留末尾 |
+
+### 调试日志上传（`.zlog`）
+
+打开 debug 后，扩展会在 **Geyser 启动时**从 `cdn.redstone.xin` 拉取 ML-KEM-1024 公钥，
+在 **Geyser 结束时**把本次日志 GZIP 压缩、用 ML-KEM 封装出的共享密钥经 HKDF 派生
+**AES-256-GCM** 加密，打包成 `<10位id>.zlog` 上传到 `log.4f4t.top`，然后正常退出。
+
+上传成功后控制台会打印一行 `ZLog: 上传 … → HTTP 200，下载地址 …`。
+`.zlog` 的二进制格式、密钥派生参数与服务端 Python 解密示例见 [docs/ZLOG.md](docs/ZLOG.md)。
+
+> 只在 debug 打开时启用；生产环境默认关闭，不会产生任何网络请求。
 
 **为什么 `ServerAddress` 必须设置**：网易局域网客户端上报的 `ServerAddress` 是 `":0"`，
 Geyser 的 `GeyserSession.joinAddress()` 取「最后一个 `:` 之前」的部分会得到**空字符串**。

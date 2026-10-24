@@ -46,6 +46,8 @@ dependencies {
     implementation("com.fasterxml.jackson.core:jackson-databind:2.17.0")
     implementation("com.fasterxml.jackson.dataformat:jackson-dataformat-yaml:2.17.0")
     implementation("org.bitbucket.b_c:jose4j:0.9.4")
+    // ML-KEM (FIPS 203) 用于调试日志上传时的混合加密；JDK 21 尚未内置（JDK 24 才有 JEP 496）
+    implementation("org.bouncycastle:bcprov-jdk18on:1.79")
 }
 
 tasks.shadowJar {
@@ -57,11 +59,14 @@ tasks.shadowJar {
         include(dependency("com.fasterxml.jackson.core:jackson-core:2.17.0"))
         include(dependency("com.fasterxml.jackson.dataformat:jackson-dataformat-yaml:2.17.0"))
         include(dependency("org.bitbucket.b_c:jose4j:0.9.4"))
+        include(dependency("org.bouncycastle:bcprov-jdk18on:1.79"))
     }
     // Strip dependency license files and service descriptors (not needed at runtime)
     exclude("META-INF/LICENSE", "META-INF/NOTICE", "META-INF/*LICENSE*", "META-INF/*NOTICE*",
-        "META-INF/thirdparty-LICENSE", "META-INF/maven/**", "META-INF/services/**")
+        "META-INF/thirdparty-LICENSE", "META-INF/maven/**", "META-INF/services/**",
+        "META-INF/*.SF", "META-INF/*.DSA", "META-INF/*.RSA", "META-INF/versions/**/module-info.class")
     relocate("com.fasterxml.jackson", "nc.geyserext.shaded.jackson")
     relocate("org.yaml.snakeyaml", "nc.geyserext.shaded.yaml")
     relocate("org.jose4j", "nc.geyserext.shaded.jose4j")
+    relocate("org.bouncycastle", "nc.geyserext.shaded.bouncycastle")
 }
