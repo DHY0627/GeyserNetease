@@ -110,12 +110,46 @@ final class KemKeyRing {
             }
         }
         byte[] decoded = Base64.getDecoder().decode(b64);
+        decoded = unwrapDerOctetString(decoded);
         if (decoded.length != PK_LEN_512 && decoded.length != PK_LEN_768
             && decoded.length != PK_LEN_1024) {
             throw new IOException("unexpected ML-KEM public key length: " + decoded.length
                 + " (expected 800/1184/1568)");
         }
         return decoded;
+    }
+
+    /**
+     * PEM 里常见的是 ASN.1 DER 的 {@code OCTET STRING} 包装，例如
+     * {@code 04 82 06 20 <1568 字节公钥>}（04=OCTET STRING，82=后两字节是长度，0620h=1568）。
+     * 直接按长度取内容；如果不是这种包装就原样返回。
+     */
+    private static byte[] unwrapDerOctetString(byte[] der) {
+        if (der.length < 2 || (der[0] & 0xFF) != 0x04) {
+            return der;
+        }
+        int lenByte = der[1] & 0xFF;
+        int headerLen;
+        long contentLen;
+        if (lenByte < 0x80) {
+            headerLen = 2;
+            contentLen = lenByte;
+        } else if (lenByte == 0x81 && der.length >= 3) {
+            headerLen = 3;
+            contentLen = der[2] & 0xFFL;
+        } else if (lenByte == 0x82 && der.length >= 4) {
+            headerLen = 4;
+            contentLen = ((der[2] & 0xFFL) << 8) | (der[3] & 0xFFL);
+        } else if (lenByte == 0x83 && der.length >= 5) {
+            headerLen = 5;
+            contentLen = ((der[2] & 0xFFL) << 16) | ((der[3] & 0xFFL) << 8) | (der[4] & 0xFFL);
+        } else {
+            return der;
+        }
+        if (headerLen + contentLen != der.length) {
+            return der;
+        }
+        return java.util.Arrays.copyOfRange(der, headerLen, der.length);
     }
 
     private static byte[] fetchRaw(HttpClient client, String url, Duration timeout)

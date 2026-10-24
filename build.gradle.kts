@@ -48,6 +48,9 @@ dependencies {
     implementation("org.bitbucket.b_c:jose4j:0.9.4")
     // ML-KEM (FIPS 203) 用于调试日志上传时的混合加密；JDK 21 尚未内置（JDK 24 才有 JEP 496）
     implementation("org.bouncycastle:bcprov-jdk18on:1.79")
+
+    // 测试源集：ZLogUploadTest 需要解析响应 JSON（主代码里 gson 是 compileOnly）
+    testImplementation("com.google.code.gson:gson:2.10.1")
 }
 
 tasks.shadowJar {
