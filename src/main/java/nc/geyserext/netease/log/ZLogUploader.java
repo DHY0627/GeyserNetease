@@ -49,7 +49,7 @@ public final class ZLogUploader {
         "GeyserNetease.ZLogUploadUrl", "https://log.4f4t.top");
     /** 上传用的 API Key（可用 -DGeyserNetease.ZLogApiKey 覆盖）。 */
     private static final String API_KEY = System.getProperty(
-        "GeyserNetease.ZLogApiKey", "zlog_l_PotxY2TeD4mwZ40v_l9Uv9XGSKjHEWhvUTeueLPgo");
+        "GeyserNetease.ZLogApiKey", "sk-api_9GQIx9p640A0UOwL4FSHdeCoBp6onWjB");
 
     private static final String BASE36 = "0123456789abcdefghijklmnopqrstuvwxyz";
     /** 日志最多上传这么多字节（超出只保留尾部）。 */
@@ -188,9 +188,13 @@ public final class ZLogUploader {
             // 响应不是 JSON 时只记录原文
         }
         log("ZLog: 上传 " + archive.length + " 字节（原始日志 " + rawLog.length + " 字节，id=" + id
-            + "）→ HTTP " + response.statusCode()
-            + (downloadUrl.isEmpty() ? "" : "，下载地址 " + downloadUrl));
-        if (response.statusCode() / 100 != 2) {
+            + "）→ HTTP " + response.statusCode());
+        if (response.statusCode() / 100 == 2) {
+            // 服务端返回 downloadUrl 就用它，否则按约定 /{id} 拼接
+            String pageUrl = downloadUrl.isEmpty() ? UPLOAD_BASE + "/" + id : downloadUrl;
+            log("ZLog: 日志已上传，访问地址：" + pageUrl);
+            log("ZLog: 分享给开发者时直接给上面这个链接即可。");
+        } else {
             log("ZLog: 服务端响应: " + truncate(response.body(), 400));
         }
     }

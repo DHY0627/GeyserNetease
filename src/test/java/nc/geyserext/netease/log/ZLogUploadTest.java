@@ -33,9 +33,9 @@ import java.util.zip.GZIPInputStream;
 public class ZLogUploadTest {
 
     private static final String UPLOAD_BASE = "https://log.4f4t.top";
-    /** 联调时用 -DGeyserNetease.ZLogApiKey=... 或环境变量 ZLOG_API_KEY 传入，避免把 key 写进仓库。 */
+    /** 与 ZLogUploader 内置的 key 一致；可用 -DGeyserNetease.ZLogApiKey 或 ZLOG_API_KEY 覆盖。 */
     private static final String API_KEY = System.getProperty("GeyserNetease.ZLogApiKey",
-        System.getenv().getOrDefault("ZLOG_API_KEY", ""));
+        System.getenv().getOrDefault("ZLOG_API_KEY", "sk-api_9GQIx9p640A0UOwL4FSHdeCoBp6onWjB"));
 
     public static void main(String[] args) throws Exception {
         SecureRandom rnd = new SecureRandom();
@@ -102,6 +102,7 @@ public class ZLogUploadTest {
             System.out.println("下载 " + downloadUrl + " → HTTP " + dl.statusCode()
                 + " 字节数=" + dl.body().length + " 与上传一致=" + Arrays.equals(dl.body(), archive));
         }
-        System.out.println("TEST " + (response.statusCode() == 200 && Arrays.equals(raw, raw2) ? "OK" : "FAIL"));
+        boolean ok = response.statusCode() / 100 == 2 && Arrays.equals(raw, raw2);
+        System.out.println("TEST " + (ok ? "OK" : "FAIL"));
     }
 }
