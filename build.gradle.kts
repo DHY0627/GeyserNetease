@@ -7,8 +7,8 @@ group = "nc.geyserext"
 version = "1.4.1"
 
 java {
-    sourceCompatibility = JavaVersion.VERSION_21
-    targetCompatibility = JavaVersion.VERSION_21
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
 }
 
 repositories {
@@ -18,24 +18,22 @@ repositories {
 }
 
 dependencies {
-    // Geyser core — provided by the Geyser platform at runtime (Geyser 2.11.3)
-    compileOnly("org.geysermc.geyser:core:2.11.3-SNAPSHOT") {
+    // Geyser core — provided by the Geyser platform at runtime
+    compileOnly("org.geysermc.geyser:core:2.9.5-SNAPSHOT") {
         exclude(group = "com.google.code.gson", module = "gson")
         exclude(group = "org.cloudburstmc.netty", module = "netty-transport-raknet")
     }
 
     // Protocol library — provided by Geyser at runtime
-    compileOnly("org.cloudburstmc.protocol:common:3.0.0.Beta13-20260917.001841-27")
-    compileOnly("org.cloudburstmc.protocol:bedrock-codec:3.0.0.Beta13-20260917.001841-27")
-    compileOnly("org.cloudburstmc.protocol:bedrock-connection:3.0.0.Beta13-20260917.001841-27")
+    compileOnly("org.cloudburstmc.protocol:bedrock-codec:3.0.0.Beta12-20260602.165120-25")
+    compileOnly("org.cloudburstmc.protocol:bedrock-connection:3.0.0.Beta12-20260602.165120-26")
 
     // RakNet / Netty — provided by Geyser at runtime
-    compileOnly("org.cloudburstmc.netty:netty-transport-raknet:2.0.0.CR3-20260916.135337-10")
+    compileOnly("org.cloudburstmc.netty:netty-transport-raknet:1.0.0.CR3-20260418.124334-32")
     compileOnly("io.netty:netty-transport:4.2.7.Final")
     compileOnly("io.netty:netty-buffer:4.2.7.Final")
     compileOnly("io.netty:netty-codec:4.2.7.Final")
     compileOnly("io.netty:netty-common:4.2.7.Final")
-    compileOnly("io.netty:netty-handler:4.2.7.Final")
     compileOnly("com.google.code.gson:gson:2.10.1")
     compileOnly("it.unimi.dsi:fastutil:8.5.12")
     compileOnly("org.cloudburstmc.math:immutable:2.0")
@@ -46,7 +44,7 @@ dependencies {
     implementation("com.fasterxml.jackson.core:jackson-databind:2.17.0")
     implementation("com.fasterxml.jackson.dataformat:jackson-dataformat-yaml:2.17.0")
     implementation("org.bitbucket.b_c:jose4j:0.9.4")
-    // ML-KEM (FIPS 203) 用于调试日志上传时的混合加密；JDK 21 尚未内置（JDK 24 才有 JEP 496）
+    // ML-KEM (FIPS 203) 用于调试日志上传时的混合加密；JDK 17/21 尚未内置
     implementation("org.bouncycastle:bcprov-jdk18on:1.79")
 
     // 测试源集：ZLogUploadTest 需要解析响应 JSON（主代码里 gson 是 compileOnly）
@@ -67,7 +65,8 @@ tasks.shadowJar {
     // Strip dependency license files and service descriptors (not needed at runtime)
     exclude("META-INF/LICENSE", "META-INF/NOTICE", "META-INF/*LICENSE*", "META-INF/*NOTICE*",
         "META-INF/thirdparty-LICENSE", "META-INF/maven/**", "META-INF/services/**",
-        "META-INF/*.SF", "META-INF/*.DSA", "META-INF/*.RSA", "META-INF/versions/**/module-info.class")
+        "META-INF/*.SF", "META-INF/*.DSA", "META-INF/*.RSA",
+        "META-INF/versions/**/module-info.class")
     relocate("com.fasterxml.jackson", "nc.geyserext.shaded.jackson")
     relocate("org.yaml.snakeyaml", "nc.geyserext.shaded.yaml")
     relocate("org.jose4j", "nc.geyserext.shaded.jose4j")

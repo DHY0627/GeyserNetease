@@ -10,7 +10,10 @@
 - ✅ 国际版基岩版玩家
 - ✅ **网易版基岩版玩家**（本扩展）
 
-> 作者：EiluDick / ZDarkZ · 本仓库额外做了 **Geyser 2.11.3 / 协议 860 适配** 与 **Java 握手 hostname 修复**（见「已知问题」）
+> 作者：EiluDick / ZDarkZ · 本仓库额外做了 **Geyser 2.9.4 / 协议 860 适配** 与 **Java 握手 hostname 修复**（见「已知问题」）
+>
+> 📌 **本仓库目前只维护并发布 Geyser 2.9.4 兼容版本**（`extension.yml` 的 `api: 2.9.4`，可在 Geyser 2.9.4 ~ 2.10.1 上加载）。
+> 之前基于 Geyser 2.11.3 的源码保留在 [`2.11.3`](../../tree/2.11.3) 分支，不再发布新构建。
 
 ---
 
@@ -30,8 +33,8 @@
 
 ## 前置要求
 
-1. 已安装 **Geyser**（本扩展不能单独运行），扩展 API **2.9.10+**；本仓库构建目标为 **Geyser core 2.11.3-SNAPSHOT**（bedrock-codec 3.0.0.Beta13）
-2. **Java 21**
+1. 已安装 **Geyser**（本扩展不能单独运行），扩展 API **2.9.4**；本仓库构建目标为 **Geyser core 2.9.5-SNAPSHOT**（bedrock-codec 3.0.0.Beta12），实测运行于 **Geyser 2.9.4 / 2.10.1**
+2. **Java 17**（扩展本身按 Java 17 编译，运行 Geyser 用的 JDK 17/21 都可以）
 3. 平台：Geyser 各平台均可（Standalone / Velocity / BungeeCord / Spigot / Fabric / NeoForge）
 
 ---
@@ -44,12 +47,12 @@
 
 | 项 | 值 |
 |---|---|
-| 文件大小 | 3,118,355 字节（3045 KB） |
-| 构建时间 | 2026-10-07 00:49:55 |
-| SHA256 | `3388f14b508d6c5e0dea5021ceb27647dded65b7b48a1531c78a3a51216dbdf9` |
-| 适配 Geyser | 2.11.3 |
-| 扩展版本 | 1.1.0 |
-| 包含修复 | 下文「已知问题 1」的 java 握手 hostname 修复 |
+| 文件大小 | 11,517,479 字节（11,247 KB） |
+| 构建时间 | 2026-10-25 08:40:36 |
+| SHA256 | `CFA0D064E98C4953F762530634C321E0E16B69BA53F53AD1D0000A9B77DDA992` |
+| 适配 Geyser | 2.9.4（实测 2.9.4 / 2.10.1-b1174） |
+| 扩展版本 | 1.4.1 |
+| 包含修复 | 皮肤确认超时、`geyser:xxx` 提示、畸形包加固、ML-KEM 日志上传 |
 
 `extension.yml` 元信息：
 
@@ -57,7 +60,8 @@
 id: geyser-netease
 name: GeyserNetEase
 main: nc.geyserext.netease.NeteaseExtension
-version: 1.1.0
+api: 2.9.4
+version: 1.4.0
 ```
 
 > 该 jar 与源码一一对应：构建后 `dist/` 与 `build/libs/` 的文件哈希一致，
@@ -106,7 +110,7 @@ cp build/libs/GeyserNeteaseExtension.jar dist/GeyserNeteaseExtension.jar
 3. 重启服务器，日志出现下面两行即加载成功：
 
    ```
-   [geyser-netease] NetEase Extension starting... [build geyser2.11.3-...]
+   [geyser-netease] NetEase Extension starting... [build geyser2.9.4-...]
    [geyser-netease] NetEase Extension initialized — RakNet v8 clients supported.
    ```
 
@@ -208,7 +212,7 @@ return combined.substring(0, index);               // → ""
 
 - 确认 jar 放在**扩展目录**而不是 `plugins/` 根目录（放错会报 `Did not find a valid velocity-plugin.json`）
 - 确认文件名是 `GeyserNeteaseExtension.jar`
-- 确认 Geyser 版本满足扩展 API 要求（2.9.10+；本版本针对 2.11.3 构建）
+- 确认 Geyser 版本满足扩展 API 要求（`api: 2.9.4`；本版本针对 Geyser 2.9.4 ~ 2.10.1 构建）
 
 ---
 

@@ -69,6 +69,9 @@ NOTES="${RUNNER_TEMP:-/tmp}/release-notes.md"
 {
   echo "## v$NEW ($BUMP)"
   echo
+  echo "> 适配 Geyser **2.9.4**（\`extension.yml\` 的 \`api: 2.9.4\`），实测可在 Geyser 2.9.4 ~ 2.10.1 上加载。"
+  echo "> 本仓库只发布 2.9.4 兼容版本；Geyser 2.11.3 的源码见 \`2.11.3\` 分支。"
+  echo
   echo "### 变更"
   echo
   if [ -n "$FROM" ]; then

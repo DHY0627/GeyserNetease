@@ -16,7 +16,7 @@ import org.geysermc.geyser.api.extension.*;
 public class NeteaseExtension implements Extension {
 
     /** 构建标识：用于在服务器日志中确认运行的是哪个版本。 */
-    public static final String BUILD_TAG = "geyser2.11.3-zlog-20261025";
+    public static final String BUILD_TAG = "geyser2.9.4-zlog-20261025";
 
     /** 诊断日志开关：-DGeyserNetease.Debug=true 打开（默认关闭）。 */
     public static final boolean DEBUG =

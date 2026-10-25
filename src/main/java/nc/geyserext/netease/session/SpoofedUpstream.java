@@ -37,6 +37,8 @@ public class SpoofedUpstream extends UpstreamSession {
     private final boolean hashing;
     private final long neteaseUid;
     private boolean skinConfirmed;
+    /** 已经警告过的“当前 codec 不认识的包类型”，避免同类包把日志刷爆。 */
+    private final Set<Class<?>> unknownPacketWarned = new HashSet<>();
 
     public SpoofedUpstream(UpstreamSession real, BedrockServerSession s,
             int[] rt, boolean[] hv, boolean hashing, long neteaseUid) {
@@ -51,7 +53,6 @@ public class SpoofedUpstream extends UpstreamSession {
     @Override public void disconnect(String r) { real.disconnect(r); }
     @Override public BedrockServerSession getSession() { return real.getSession(); }
     @Override public boolean isClosed() { return real.isClosed(); }
-
     @Override public void sendPacket(BedrockPacket p) {
         if (skipUnknownPacket(p)) return;
         if (dropGeyserUiText(p)) return;
@@ -59,7 +60,6 @@ public class SpoofedUpstream extends UpstreamSession {
         real.sendPacket(rewrite(p));
         hook(p, false);
     }
-
     @Override public void sendPacketImmediately(BedrockPacket p) {
         if (skipUnknownPacket(p)) return;
         if (dropGeyserUiText(p)) return;
@@ -68,14 +68,11 @@ public class SpoofedUpstream extends UpstreamSession {
         hook(p, true);
     }
 
-    /** 已警告过"当前 codec 不认识"的包类型，避免同类包把日志刷爆。 */
-    private final Set<Class<?>> unknownPacketWarned = new HashSet<>();
-
     /**
      * 双保险：正常情况下 {@link #getProtocolVersion()} 直接取真实 codec 版本，Geyser 不会发当前
      * codec 里没有的包。但若将来 Geyser 换版本、或某个包没在网易 codec 中注册，
      * 编码阶段会抛 {@code NullPointerException: getPacketDefinition(...) is null} 并直接踢掉玩家
-     * （表现为 "Exception caught in session of ..."，随后与 Java 服断开）。
+     * （表现为 “Exception caught in session of ...”，随后与 Java 服断开）。
      * 这类包不能硬发，只能跳过并记一条日志，保证玩家还能继续游玩。
      */
     private boolean skipUnknownPacket(BedrockPacket p) {
@@ -88,7 +85,6 @@ public class SpoofedUpstream extends UpstreamSession {
                 + ") 未注册包 " + p.getClass().getSimpleName()
                 + "，已跳过（Geyser 版本与本扩展的 bedrock-codec 版本可能不一致）");
         }
-        NeteaseExtension.debug("[netease] 已跳过未注册包: " + p.getClass().getSimpleName());
         return true;
     }
 
@@ -99,13 +95,7 @@ public class SpoofedUpstream extends UpstreamSession {
      */
     private static void stripGeyserCommands(BedrockPacket p) {
         if (p instanceof AvailableCommandsPacket available) {
-            int before = available.getCommands().size();
             available.getCommands().removeIf(command -> GEYSER_COMMAND_ROOT.equals(command.getName()));
-            int removed = before - available.getCommands().size();
-            if (removed > 0) {
-                NeteaseExtension.debug("[netease] 已从 AvailableCommandsPacket 移除 " + removed + " 个 geyser 命令，剩余 "
-                    + available.getCommands().size() + " 个");
-            }
         }
     }
 
@@ -116,9 +106,8 @@ public class SpoofedUpstream extends UpstreamSession {
     private static boolean dropGeyserUiText(BedrockPacket p) {
         if (!(p instanceof TextPacket text)) return false;
         if (text.getType() != TextPacket.Type.TIP) return false;
-        String message = text.getMessage();
-        if (message == null || !message.startsWith(GEYSER_UI_TEXT_PREFIX)) return false;
-        NeteaseExtension.debug("[netease] 已丢弃 JSON UI 文本: " + message);
+        CharSequence message = text.getMessage();
+        if (message == null || !message.toString().startsWith(GEYSER_UI_TEXT_PREFIX)) return false;
         return true;
     }
 
@@ -171,8 +160,6 @@ public class SpoofedUpstream extends UpstreamSession {
             e.setValid(true);
             e.setSkinBytes(image);
             e.setGeoStr(geo != null ? geo : "");
-            NeteaseExtension.debug("[netease] ConfirmSkin valid uuid=" + uuid
-                + " image=" + image.length + " geo=" + (geo == null ? -1 : geo.length()));
         } else {
             // Persona / 4D 皮肤没有 64x64 皮肤图。ConfirmSkinSerializer 对 null 字段会抛异常
             // （writeByteArray / writeString 内部 checkNotNull），必须显式发 valid=false 的空条目，
@@ -180,7 +167,6 @@ public class SpoofedUpstream extends UpstreamSession {
             e.setValid(false);
             e.setSkinBytes(new byte[0]);
             e.setGeoStr("");
-            NeteaseExtension.debug("[netease] ConfirmSkin invalid(fallback) uuid=" + uuid);
         }
 
         csp.getEntries().add(e);

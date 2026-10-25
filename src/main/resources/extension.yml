@@ -1,6 +1,6 @@
 id: geyser-netease
 name: GeyserNetEase
 main: nc.geyserext.netease.NeteaseExtension
-api: 2.9.10
+api: 2.9.4
 version: 1.4.1
 authors: [EiluDick/ZDarkZ]

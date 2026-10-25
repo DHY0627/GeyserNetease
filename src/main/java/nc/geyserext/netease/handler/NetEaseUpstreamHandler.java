@@ -23,7 +23,7 @@ import org.cloudburstmc.protocol.common.PacketSignal;
 import org.geysermc.geyser.GeyserImpl;
 import org.geysermc.geyser.api.event.bedrock.SessionInitializeEvent;
 import org.geysermc.geyser.event.type.SessionLoadResourcePacksEventImpl;
-import org.geysermc.geyser.network.bedrock.GameProtocol;
+import org.geysermc.geyser.network.GameProtocol;
 import org.geysermc.geyser.registry.BlockRegistries;
 import org.geysermc.geyser.registry.Registries;
 import org.geysermc.geyser.session.GeyserSession;
@@ -42,23 +42,36 @@ import java.util.*;
 public class NetEaseUpstreamHandler extends UpstreamHandlerBase {
 
     /**
-     * 是否跳过 Bedrock 层加密握手。
-     *
-     * <p>网易客户端通过 NetherNet（WebRTC/SCTP，本身已由 DTLS 加密）连接，
-     * 实测它收到 {@code ServerToClientHandshake} 后会静默忽略并最终超时
-     * （4 种批次封装格式均如此），即局域网流程不做 Bedrock 层加密。
-     * 因此默认跳过加密握手，直接进入资源包阶段。</p>
-     *
-     * <p>可用 {@code -DGeyserNetease.SkipEncryption=false} 关闭。</p>
+     * 网易局域网客户端的客户端数据里 ServerAddress 常为 ":0" 或含 '|' 的非法值
+     * （形如 "host|port"）。GeyserSession.joinAddress() 会原样取用，
+     * forward-hostname=true 时 java 握手就带着这个非法 hostname 发给 Velocity，
+     * Velocity 在登录阶段直接静默掐断连接（前线处理器不打日志）。
      */
-    private static final boolean SKIP_ENCRYPTION =
-        !"false".equalsIgnoreCase(System.getProperty("GeyserNetease.SkipEncryption", "true"));
+    private static final String FORCED_SERVER_ADDRESS =
+        System.getProperty("GeyserNetease.ServerAddress", "example.com:19132");
+
+    private static void patchServerAddress(BedrockClientData bcd) {
+        if (bcd == null) return;
+        try {
+            String cur = bcd.getServerAddress();
+            NeteaseExtension.LOG.info("[GeyserNetease] 客户端 ServerAddress=" + (cur == null ? "null" : "\"" + cur + "\""));
+            if (cur != null && !cur.isEmpty() && !cur.startsWith(":") && !cur.contains("|")) return;
+            boolean ok = false;
+            try {
+                java.lang.reflect.Method m = BedrockClientData.class.getDeclaredMethod("setServerAddress", String.class);
+                m.setAccessible(true); m.invoke(bcd, FORCED_SERVER_ADDRESS); ok = true;
+            } catch (Throwable ignored) {}
+            if (!ok) {
+                java.lang.reflect.Field fl = BedrockClientData.class.getDeclaredField("serverAddress");
+                fl.setAccessible(true); fl.set(bcd, FORCED_SERVER_ADDRESS);
+            }
+            NeteaseExtension.LOG.info("[GeyserNetease] 已修正 ServerAddress -> \"" + FORCED_SERVER_ADDRESS + "\"（java 握手 hostname 依赖它）");
+        } catch (Throwable e) {
+            NeteaseExtension.LOG.error("[GeyserNetease] 修正 ServerAddress 失败: " + e);
+        }
+    }
 
     private NeteaseSession neteaseSession;
-
-    /** 是否已经下发过 PlayStatus / ResourcePacksInfo，避免重复发送。 */
-    private boolean loginFlowCompleted;
-
     public NetEaseUpstreamHandler(GeyserImpl geyser, GeyserSession session) {
         super(geyser, session);
     }
@@ -67,18 +80,10 @@ public class NetEaseUpstreamHandler extends UpstreamHandlerBase {
     public PacketSignal handle(RequestNetworkSettingsPacket packet) {
         Integer rakVer = getRakVersion();
         boolean isNetEase = rakVer != null && rakVer == 8;
-        if (!isNetEase) {
-            NeteaseExtension.debug("[GeyserNetease] 非网易连接（rakVer=" + rakVer + "），交回标准处理");
-            return super.handle(packet);
-        }
+        if (!isNetEase) return super.handle(packet);
 
         BedrockCodec codec = NeteaseCodecRegistry.getCodec(packet.getProtocolVersion());
-        if (codec == null) {
-            NeteaseExtension.debug("[GeyserNetease] 未注册的网易协议版本 " + packet.getProtocolVersion() + "，交回标准处理");
-            return super.handle(packet);
-        }
-        NeteaseExtension.debug("[GeyserNetease] 网易路径已激活：rakVer=" + rakVer
-            + " 协议=" + packet.getProtocolVersion() + " 跳过加密=" + SKIP_ENCRYPTION);
+        if (codec == null) return super.handle(packet);
 
         session.getUpstream().getSession().setCodec(codec);
         neteaseSession = new NeteaseSession(session, packet.getProtocolVersion(), codec);
@@ -137,16 +142,8 @@ public class NetEaseUpstreamHandler extends UpstreamHandlerBase {
                     session.setClientData(buildFakeClientData(name));
                 patchServerAddress(session.getClientData());
 
-                if (!SKIP_ENCRYPTION) {
-                    NeteaseExtension.debug("[GeyserNetease] 发送 ServerToClientHandshake（加密握手）");
-                    startEncryptionHandshake(session, result.identityClaims().parsedIdentityPublicKey());
-                    if (session.isClosed()) { session.forciblyCloseUpstream(); return PacketSignal.HANDLED; }
-                    neteaseSession.setLoginDeferred(true);
-                } else {
-                    // 网易局域网流程不做 Bedrock 层加密：不发送握手、不启用加密
-                    NeteaseExtension.debug("[GeyserNetease] 已跳过 ServerToClientHandshake（网易局域网流程不做 Bedrock 层加密）");
-                    neteaseSession.setLoginDeferred(false);
-                }
+                neteaseSession.setLoginDeferred(false);
+                NeteaseExtension.LOG.info("[GeyserNetease] 已跳过 ServerToClientHandshake（网易客户端收到该包会静默忽略并超时）");
             }
         } catch (Exception e) { session.disconnect("disconnectionScreen.internalError.cantConnect"); NeteaseExtension.LOG.error("NetEase auth failed", e); return PacketSignal.HANDLED; }
 
@@ -169,9 +166,12 @@ public class NetEaseUpstreamHandler extends UpstreamHandlerBase {
         try {
             for (int i = 0; i <= maxId; i++) {
                 var block = blockMappings.getDefinition(i);
-                if (block instanceof org.geysermc.geyser.registry.type.GeyserBedrockBlock gb && gb.getState() != null) {
-                    rtToHash[i] = nc.geyserext.netease.util.BlockHashUtils.fnv1a32Nbt(gb.getState());
-                    hValid[i] = true;
+                if (block instanceof org.geysermc.geyser.registry.type.GeyserBedrockBlock) {
+                    var gb = (org.geysermc.geyser.registry.type.GeyserBedrockBlock) block;
+                    if (gb.getState() != null) {
+                        rtToHash[i] = nc.geyserext.netease.util.BlockHashUtils.fnv1a32Nbt(gb.getState());
+                        hValid[i] = true;
+                    }
                 }
             }
         } catch (Throwable t) {
@@ -192,33 +192,22 @@ public class NetEaseUpstreamHandler extends UpstreamHandlerBase {
         this.geyser.eventBus().fireEventElseKick(this.resourcePackLoadEvent, session);
         if (session.isClosed()) return PacketSignal.HANDLED;
         session.integratedPackActive(resourcePackLoadEvent.isIntegratedPackActive());
-        GeyserLocale.loadGeyserLocale(session.locale());
-
-        if (SKIP_ENCRYPTION && !loginFlowCompleted) {
-            // 没有加密握手，客户端不会发 ClientToServerHandshake，
-            // 因此这里直接下发 PlayStatus + ResourcePacksInfo
-            sendLoginSuccessAndPacks();
-        }
-        return PacketSignal.HANDLED;
-    }
-
-    /** 发送 PlayStatus(LOGIN_SUCCESS) 与 ResourcePacksInfo，进入资源包阶段。 */
-    private void sendLoginSuccessAndPacks() {
-        if (loginFlowCompleted || session.isClosed()) return;
-        loginFlowCompleted = true;
-        NeteaseExtension.debug("[GeyserNetease] 下发 PlayStatus(LOGIN_SUCCESS) + ResourcePacksInfo");
-
         PlayStatusPacket ps = new PlayStatusPacket();
         ps.setStatus(PlayStatusPacket.Status.LOGIN_SUCCESS);
         session.sendUpstreamPacket(ps);
-        if (session.isClosed()) return;
 
         ResourcePacksInfoPacket rpi = new ResourcePacksInfoPacket();
         rpi.getResourcePackInfos().addAll(this.resourcePackLoadEvent.infoPacketEntries());
         rpi.setVibrantVisualsForceDisabled(!session.isAllowVibrantVisuals());
         rpi.setForcedToAccept(geyser.config().gameplay().forceResourcePacks() || resourcePackLoadEvent.isIntegratedPackActive());
-        rpi.setWorldTemplateId(java.util.UUID.randomUUID()); rpi.setWorldTemplateVersion("*");
+        rpi.setWorldTemplateId(java.util.UUID.randomUUID());
+        rpi.setWorldTemplateVersion("*");
         session.sendUpstreamPacket(rpi);
+        NeteaseExtension.LOG.info("[GeyserNetease] 已下发 PlayStatus(LOGIN_SUCCESS) + ResourcePacksInfo");
+
+        if (SNIFF_ENABLED) startJavaSniffer();
+        GeyserLocale.loadGeyserLocale(session.locale());
+        return PacketSignal.HANDLED;
     }
 
     @Override
@@ -226,29 +215,25 @@ public class NetEaseUpstreamHandler extends UpstreamHandlerBase {
         return defaultHandler(packet);
     }
 
-    /**
-     * 记录网易客户端发来的聊天包，便于定位“聊天不可用”问题（仅 debug 模式打印）。
-     * 不在 debug 模式下做任何额外处理，转发行为与之前完全一致。
-     */
-    @Override
-    public PacketSignal handle(TextPacket packet) {
-        NeteaseExtension.debug("[GeyserNetease] 收到 TextPacket type=" + packet.getType()
-            + " message='" + packet.getMessage() + "' filtered='" + packet.getFilteredMessage()
-            + "' sourceName='" + packet.getSourceName() + "' xuid='" + packet.getXuid() + "'");
-        return defaultHandler(packet);
-    }
-
     @Override
     public PacketSignal handle(ClientToServerHandshakePacket packet) {
         if (neteaseSession != null && neteaseSession.loginDeferred()) {
             neteaseSession.setLoginDeferred(false);
+            PlayStatusPacket ps = new PlayStatusPacket();
+            ps.setStatus(PlayStatusPacket.Status.LOGIN_SUCCESS);
+            session.sendUpstreamPacket(ps);
             if (this.resourcePackLoadEvent == null) {
                 this.resourcePackLoadEvent = new org.geysermc.geyser.event.type.SessionLoadResourcePacksEventImpl(session);
                 this.geyser.eventBus().fireEventElseKick(this.resourcePackLoadEvent, session);
             }
             if (session.isClosed()) return PacketSignal.HANDLED;
             session.integratedPackActive(resourcePackLoadEvent.isIntegratedPackActive());
-            sendLoginSuccessAndPacks();
+            ResourcePacksInfoPacket rpi = new ResourcePacksInfoPacket();
+            rpi.getResourcePackInfos().addAll(this.resourcePackLoadEvent.infoPacketEntries());
+            rpi.setVibrantVisualsForceDisabled(!session.isAllowVibrantVisuals());
+            rpi.setForcedToAccept(geyser.config().gameplay().forceResourcePacks() || resourcePackLoadEvent.isIntegratedPackActive());
+            rpi.setWorldTemplateId(java.util.UUID.randomUUID()); rpi.setWorldTemplateVersion("*");
+            session.sendUpstreamPacket(rpi);
             return PacketSignal.HANDLED;
         }
         return super.handle(packet);
@@ -264,17 +249,11 @@ public class NetEaseUpstreamHandler extends UpstreamHandlerBase {
             case COMPLETED -> {
                 finishedResourcePackSending = true;
                 if (geyser.config().java().authType() != AuthType.ONLINE) {
-                    String javaName = javaLoginName(session.getAuthData().name(), neteaseSession.uid());
-                    NeteaseExtension.debug("[GeyserNetease] Java 侧登录名 = " + javaName
-                        + "（Bedrock 显示名 = " + session.getAuthData().name() + "，ASCII=" + ASCII_JAVA_NAME + "）");
-                    session.authenticate(javaName);
+                    session.authenticate(session.getAuthData().name());
                 } else if (!couldLoginUserByName(session.getAuthData().name())) {
                     session.connect();
                 }
                 neteaseSession.setAuthenticated(true);
-                // authenticate() 会同步创建 downstream 会话对象，返回后立刻挂监听器，
-                // 这样第一个包（握手/LoginStart）也能被记录到。
-                attachJavaSniffer();
             }
             case SEND_PACKS -> { if (!packet.getPackIds().isEmpty()) { packsToSend.addAll(packet.getPackIds()); sendPackDataInfo(packsToSend.pop()); } return PacketSignal.HANDLED; }
             case HAVE_ALL_PACKS -> {
@@ -353,209 +332,104 @@ public class NetEaseUpstreamHandler extends UpstreamHandlerBase {
 
     public NeteaseSession neteaseSession() { return neteaseSession; }
 
-    /**
-     * Java 侧登录名。
-     *
-     * <p>网易客户端的显示名是中文（如 "锕钼铽镧锶"）。Geyser 会原样把它交给 MCProtocolLib
-     * 作为 java 版 LoginStart 的用户名，而实测该用户名会让 Velocity 侧在登录阶段静默掐断连接
-     * （Velocity 的 MinecraftConnection.exceptionCaught 对 InitialLoginSessionHandler /
-     * HandshakeSessionHandler 这类"前线"处理器不打任何日志，直接 ctx.close()）。
-     * 因此默认改用纯 ASCII、稳定的 java 登录名；Bedrock 侧显示名不变。</p>
-     *
-     * <p>可用 {@code -DGeyserNetease.AsciiJavaName=false} 关闭，恢复原来的中文名登录。</p>
-     */
-    private static final boolean ASCII_JAVA_NAME =
-        "true".equalsIgnoreCase(System.getProperty("GeyserNetease.AsciiJavaName", "false"));
-
-    private static String javaLoginName(String bedrockName, long uid) {
-        if (!ASCII_JAVA_NAME) return bedrockName;
-        String base = "NE" + Math.abs(uid);
-        if (base.length() > 16) base = base.substring(0, 16);
-        return base;
-    }
-
-    /**
-     * Java 侧地址（用于 Geyser 的 {@code session.joinAddress()}，也就是 java 握手的 hostname）。
-     *
-     * <p>网易局域网客户端的客户端数据里 {@code ServerAddress} 是 {@code ":0"}，
-     * 于是 {@code GeyserSession.joinAddress()} = {@code substring(0, 0)} = 空字符串，
-     * 若 Geyser 配置了 {@code forward-hostname: true}，java 握手就会带着空 hostname 发给代理；
-     * Velocity 收到空 hostname 会在登录阶段直接静默掐断连接（
-     * {@code MinecraftConnection.exceptionCaught} 对 InitialLoginSessionHandler 不打日志）。
-     * 这里强制填一个真实的公开地址。可用 {@code -DGeyserNetease.ServerAddress=...} 覆盖。</p>
-     */
-    private static final String FORCED_SERVER_ADDRESS =
-        System.getProperty("GeyserNetease.ServerAddress", "example.com:19132");
-
-    /** 从 {@link #FORCED_SERVER_ADDRESS} 取主机部分（去掉端口）。 */
-    private static String handshakeHost() {
-        String v = FORCED_SERVER_ADDRESS;
-        int i = v.lastIndexOf(':');
-        return i > 0 ? v.substring(0, i) : v;
-    }
-
-    /** 把客户端数据里的 ServerAddress 从 ":0" 修成一个正常地址；已经是正常值则不动。 */
-    private static void patchServerAddress(BedrockClientData bcd) {
-        if (bcd == null) return;
-        try {
-            String cur = bcd.getServerAddress();
-            if (cur != null && !cur.isEmpty() && !cur.startsWith(":")) return;
-            boolean ok = false;
-            try {
-                var m = BedrockClientData.class.getDeclaredMethod("setServerAddress", String.class);
-                m.setAccessible(true);
-                m.invoke(bcd, FORCED_SERVER_ADDRESS);
-                ok = true;
-            } catch (Throwable ignored) {
-            }
-            if (!ok) {
-                var f = BedrockClientData.class.getDeclaredField("serverAddress");
-                f.setAccessible(true);
-                f.set(bcd, FORCED_SERVER_ADDRESS);
-            }
-            NeteaseExtension.debug("[GeyserNetease] 客户端 ServerAddress \"" + cur + "\" → \""
-                + FORCED_SERVER_ADDRESS + "\"（java 握手 hostname 依赖它）");
-        } catch (Throwable e) {
-            NeteaseExtension.LOG.error("[GeyserNetease] 修正 ServerAddress 失败: " + e);
-        }
-    }
-
-    // ==================== Java 侧嗅探（诊断用） ====================
-    //
-    // 目的：网易玩家在 "Geyser → Velocity" 这一跳会被静默断流（Velocity 的
-    // MinecraftConnection.exceptionCaught 对 InitialLoginSessionHandler /
-    // HandshakeSessionHandler 这类"前线"处理器不打任何日志，直接 ctx.close()；
-    // 解码失败又是 QuietRuntimeException），因此服务器日志里什么都看不到。
-    //
-    // 这里在 Geyser 的 downstream（MCProtocolLib）会话上挂一个 SessionListener：
-    //   packetSending  → Geyser 发往 Velocity 的每一个包（含握手/LoginStart）
-    //   packetReceived → Velocity 发来的每一个包（含 LoginSuccess/Disconnect）
-    //   packetError / disconnecting / disconnected → 异常与断开原因
-    // 结果写入运行目录下的 geyser-netease-java.log。
+    // ==================== Java 侧嗅探（诊断用，-DGeyserNetease.Sniff=true 开启）====================
+    private static final boolean SNIFF_ENABLED =
+        Boolean.parseBoolean(System.getProperty("GeyserNetease.Sniff", "false"));
     private static volatile java.io.PrintWriter SNIFF_OUT;
-    private static volatile String SNIFF_PATH = "(未初始化)";
-    private static final java.util.concurrent.atomic.AtomicBoolean SNIFF_STARTED =
-        new java.util.concurrent.atomic.AtomicBoolean();
+    private static final java.util.concurrent.atomic.AtomicInteger SNIFF_TRIES =
+        new java.util.concurrent.atomic.AtomicInteger();
     private static final java.util.concurrent.atomic.AtomicInteger SNIFF_CONSOLE =
         new java.util.concurrent.atomic.AtomicInteger();
 
-    private static final boolean SNIFF_ENABLED =
-        Boolean.parseBoolean(System.getProperty("GeyserNetease.Sniff", "false"));
+    /** 反射取值，成员不存在/抛错都只返回标记，绝不影响主流程。 */
+    private static String refl(Object target, String method) {
+        try { return String.valueOf(target.getClass().getMethod(method).invoke(target)); }
+        catch (Throwable e) { return "<" + e.getClass().getSimpleName() + ">"; }
+    }
+
+    private void startJavaSniffer() {
+        if (!SNIFF_ENABLED) return;
+        NeteaseExtension.LOG.info("[GeyserNetease][JSniff] 诊断: forwardHostname=" + refl(geyser.config().java(), "forwardHostname")
+            + " joinAddress=" + refl(session, "joinAddress")
+            + " remoteServer=" + refl(session, "remoteServer")
+            + " clientData.ServerAddress=" + refl(session.getClientData(), "getServerAddress")
+            + " 强制地址=" + FORCED_SERVER_ADDRESS);
+        session.scheduleInEventLoop(this::attachJavaSniffer, 20, java.util.concurrent.TimeUnit.MILLISECONDS);
+    }
 
     private void attachJavaSniffer() {
         if (!SNIFF_ENABLED) return;
-        if (!SNIFF_STARTED.compareAndSet(false, true)) return;
         try {
-            java.io.File f = new java.io.File("geyser-netease-java.log");
-            SNIFF_PATH = f.getAbsolutePath();
-            SNIFF_OUT = new java.io.PrintWriter(new java.io.FileWriter(f, true), true);
-            NeteaseExtension.debug("[GeyserNetease] Java 侧嗅探日志: " + SNIFF_PATH);
-            sniff("===== 嗅探启动 bedrockName="
-                + (session.getAuthData() != null ? session.getAuthData().name() : "?")
-                + " xuid=" + session.xuid() + " path=" + SNIFF_PATH, null);
-
-            var ds = session.getDownstream();
-            if (ds == null || ds.getSession() == null) {
-                sniff("!! downstream 尚未创建，无法挂监听器", null);
+            if (session.getDownstream() == null || session.getDownstream().getSession() == null) {
+                if (SNIFF_TRIES.incrementAndGet() < 300) {
+                    session.scheduleInEventLoop(this::attachJavaSniffer, 20, java.util.concurrent.TimeUnit.MILLISECONDS);
+                } else {
+                    NeteaseExtension.LOG.info("[GeyserNetease][JSniff] downstream 始终未创建，放弃");
+                }
                 return;
             }
-            var javaSession = ds.getSession();
-            sniff("downstream session = " + javaSession.getClass().getName(), null);
             try {
-                var rs = session.remoteServer();
-                sniff("诊断: forwardHostname=" + geyser.config().java().forwardHostname()
-                    + " joinAddress=\"" + session.joinAddress() + "\""
-                    + " remoteServer=" + (rs != null ? (rs.address() + ":" + rs.port() + " auth=" + rs.authType()) : "null")
-                    + " clientData.ServerAddress=\"" + (session.getClientData() != null
-                        ? session.getClientData().getServerAddress() : "null") + "\""
-                    + " 强制地址=" + FORCED_SERVER_ADDRESS, null);
-            } catch (Throwable t) {
-                sniff("诊断信息读取失败: " + t, null);
-            }
+                java.io.File ff = new java.io.File("geyser-netease-java.log");
+                SNIFF_OUT = new java.io.PrintWriter(new java.io.FileWriter(ff, true), true);
+                sniff("===== 嗅探启动 path=" + ff.getAbsolutePath(), null);
+            } catch (Throwable ignored) {}
+
+            var javaSession = session.getDownstream().getSession();
+            sniff("downstream=" + javaSession.getClass().getName()
+                + " forwardHostname=" + refl(geyser.config().java(), "forwardHostname")
+                + " joinAddress=" + refl(session, "joinAddress")
+                + " clientData.ServerAddress=" + refl(session.getClientData(), "getServerAddress"), null);
 
             javaSession.addListener(new org.geysermc.mcprotocollib.network.event.session.SessionAdapter() {
                 @Override
-                public void packetSending(
-                        org.geysermc.mcprotocollib.network.event.session.PacketSendingEvent event) {
-                    var p = event.getPacket();
-                    // 兜底：handshake 的 hostname 为空会导致 Velocity 静默断流
-                    if (p instanceof org.geysermc.mcprotocollib.protocol.packet.handshake.serverbound.ClientIntentionPacket ip
-                            && (ip.getHostname() == null || ip.getHostname().isEmpty())) {
-                        String host = handshakeHost();
-                        event.setPacket(ip.withHostname(host));
-                        sniff("!! 握手 hostname 为空 → 改写为 \"" + host + "\"", null);
-                        p = event.getPacket();
-                    }
-                    sniff("出→ " + p.getClass().getSimpleName() + " " + brief(p), null);
+                public void connected(org.geysermc.mcprotocollib.network.event.session.ConnectedEvent event) {
+                    sniff("== Java 通道建立 ==", null);
+                }
+
+                @Override
+                public void packetSending(org.geysermc.mcprotocollib.network.event.session.PacketSendingEvent event) {
+                    Object p = event.getPacket();
+                    String n = p.getClass().getSimpleName();
+                    boolean key = n.contains("Intention") || n.contains("Hello") || n.contains("LoginSuccess")
+                        || n.contains("Disconnect") || n.contains("Finished") || n.contains("Compression")
+                        || n.contains("Acknowledged") || n.contains("CustomQuery");
+                    sniff("出-> " + n + (key ? " " + p : ""), null);
                 }
 
                 @Override
                 public void packetReceived(org.geysermc.mcprotocollib.network.Session s,
                                            org.geysermc.mcprotocollib.network.packet.Packet p) {
-                    sniff("入← " + p.getClass().getSimpleName() + " " + brief(p), null);
+                    sniff("入<- " + p.getClass().getSimpleName() + " " + p, null);
                 }
 
                 @Override
-                public void packetError(
-                        org.geysermc.mcprotocollib.network.event.session.PacketErrorEvent event) {
+                public void packetError(org.geysermc.mcprotocollib.network.event.session.PacketErrorEvent event) {
                     sniff("!! 包错误: " + event.getCause() + " packet=" + event.getPacketClass(), null);
                 }
 
                 @Override
-                public void connected(org.geysermc.mcprotocollib.network.event.session.ConnectedEvent event) {
-                    sniff("== Java 通道建立（即将发送握手）==", null);
-                }
-
-                @Override
-                public void disconnecting(
-                        org.geysermc.mcprotocollib.network.event.session.DisconnectingEvent event) {
+                public void disconnecting(org.geysermc.mcprotocollib.network.event.session.DisconnectingEvent event) {
                     sniff("== 正在断开: reason=" + event.getReason() + " cause=" + event.getCause(), null);
                 }
 
                 @Override
-                public void disconnected(
-                        org.geysermc.mcprotocollib.network.event.session.DisconnectedEvent event) {
+                public void disconnected(org.geysermc.mcprotocollib.network.event.session.DisconnectedEvent event) {
                     sniff("== 已断开: reason=" + event.getReason() + " cause=" + event.getCause(), null);
                 }
             });
-            sniff("已注册 Java 会话监听器（监听器数=" + javaSession.getListeners().size() + "）", null);
+            sniff("已挂载 Java 会话监听器（监听器数=" + javaSession.getListeners().size() + "）", null);
         } catch (Throwable e) {
-            sniff("!! 嗅探器挂载失败: " + e, null);
+            NeteaseExtension.LOG.error("[GeyserNetease][JSniff] 嗅探器挂载失败", e);
         }
-    }
-
-    /** 只记录关键包的细节，避免日志爆炸。 */
-    private static String brief(Object p) {
-        String n = p.getClass().getSimpleName();
-        boolean key = n.contains("Hello") || n.contains("Intention") || n.contains("Acknowledged")
-            || n.contains("Disconnect") || n.contains("Finished") || n.contains("Compression")
-            || n.contains("LoginSuccess") || n.contains("CustomQuery");
-        if (!key) return "";
-        String s = String.valueOf(p);
-        return s.length() > 400 ? s.substring(0, 400) + "..." : s;
     }
 
     private static void sniff(String tag, byte[] raw) {
-        String line = "[" + java.time.LocalTime.now().withNano(0) + "] " + tag
-            + (raw != null ? " len=" + raw.length + " " + hex(raw) : "");
+        String line = "[" + java.time.LocalTime.now().withNano(0) + "] " + tag;
         java.io.PrintWriter out = SNIFF_OUT;
-        if (out != null) {
-            out.println(line);
-        } else {
-            NeteaseExtension.LOG.info("[GeyserNetease][JavaSniff] " + line);
+        if (out != null) out.println(line);
+        if (SNIFF_CONSOLE.incrementAndGet() <= 150) {
+            NeteaseExtension.LOG.info("[GeyserNetease][JSniff] " + line);
         }
-        if (SNIFF_CONSOLE.incrementAndGet() <= 120) {
-            NeteaseExtension.LOG.info("[GeyserNetease][JavaSniff] " + line);
-        }
-    }
-
-    private static String hex(byte[] b) {
-        StringBuilder sb = new StringBuilder(b.length * 2);
-        for (byte x : b) {
-            sb.append(Character.forDigit((x >> 4) & 0xf, 16));
-            sb.append(Character.forDigit(x & 0xf, 16));
-        }
-        return sb.toString();
     }
 
     private static BedrockClientData buildFakeClientData(String name) {
