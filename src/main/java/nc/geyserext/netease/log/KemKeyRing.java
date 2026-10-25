@@ -38,10 +38,13 @@ final class KemKeyRing {
 
     private final byte[] publicKeyRaw;
     private final byte[] encryptedKey;
+    /** kem.enc 拉取失败的原因；为空表示拉取成功（或没尝试）。 */
+    private final String encError;
 
-    private KemKeyRing(byte[] publicKeyRaw, byte[] encryptedKey) {
+    private KemKeyRing(byte[] publicKeyRaw, byte[] encryptedKey, String encError) {
         this.publicKeyRaw = publicKeyRaw;
         this.encryptedKey = encryptedKey;
+        this.encError = encError;
     }
 
     byte[] publicKeyRaw() {
@@ -50,6 +53,11 @@ final class KemKeyRing {
 
     byte[] encryptedKey() {
         return encryptedKey;
+    }
+
+    /** kem.enc 拉取失败原因（null 表示成功或无错误）。 */
+    String encError() {
+        return encError;
     }
 
     /** 根据公钥长度判断 KEM 参数（.zlog 里不写标识，长度本身就是唯一线索）。 */
@@ -73,17 +81,21 @@ final class KemKeyRing {
     }
 
     /**
-     * 拉取两个密钥文件。公钥是必需的，kem.enc 缺失不致命（只把空字节写进归档）。
+     * 拉取两个密钥文件。公钥是必需的；kem.enc 只是服务端预置的参考密文，
+     * 缺失不影响加密与解密（解密只需要 private.key，本次的 KEM 密文已经拼在 .zlog 里），
+     * 因此失败时降级为空字节并记录原因，便于排查。
      */
     static KemKeyRing fetch(HttpClient client, Duration timeout) throws Exception {
         byte[] publicKeyRaw = fetchPublicKey(client, timeout);
         byte[] encryptedKey;
+        String encError = null;
         try {
             encryptedKey = fetchRaw(client, ENC_KEY_URL, timeout);
         } catch (Exception e) {
             encryptedKey = new byte[0];
+            encError = e.getMessage() == null ? e.toString() : e.getMessage();
         }
-        return new KemKeyRing(publicKeyRaw, encryptedKey);
+        return new KemKeyRing(publicKeyRaw, encryptedKey, encError);
     }
 
     private static byte[] fetchPublicKey(HttpClient client, Duration timeout) throws Exception {

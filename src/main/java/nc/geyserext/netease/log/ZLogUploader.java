@@ -172,9 +172,19 @@ public final class ZLogUploader {
             long started = System.currentTimeMillis();
             KemKeyRing ring = KemKeyRing.fetch(KemKeyRing.newClient(), Duration.ofSeconds(20));
             keyRing = ring;
-            log("ZLog: 已获取 ML-KEM 公钥（" + ring.publicKeyRaw().length + " 字节）与预置密文（"
-                + ring.encryptedKey().length + " 字节），耗时 "
-                + (System.currentTimeMillis() - started) + " ms");
+            StringBuilder sb = new StringBuilder();
+            sb.append("ZLog: 已获取 ML-KEM 公钥（").append(ring.publicKeyRaw().length).append(" 字节）");
+            // kem.enc 只是服务端预置的参考密文，本次上传的 KEM 密文是客户端现封装的，
+            // 所以它缺失只是少一份参考，不影响加密与解密。这里把原因打出来避免误解。
+            if (ring.encError() != null) {
+                sb.append("；预置密文 kem.enc 获取失败（").append(KemKeyRing.ENC_KEY_URL)
+                    .append("）：").append(ring.encError())
+                    .append("，不影响日志加密与解密（解密只需要 private.key）");
+            } else {
+                sb.append("与预置密文（").append(ring.encryptedKey().length).append(" 字节）");
+            }
+            sb.append("，耗时 ").append(System.currentTimeMillis() - started).append(" ms");
+            log(sb.toString());
         } catch (Throwable t) {
             log("ZLog: 获取密钥失败: " + t);
         }
