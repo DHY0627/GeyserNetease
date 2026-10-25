@@ -32,8 +32,29 @@ public final class ServerRestartUtil {
         catch (NoClassDefFoundError e) {
             GeyserImpl.getInstance().getLogger().info("[GeyserNetease] Mod platform detected; skipping server restart. NetEase support active through channel hook.");
         }
-        catch (Exception e) {
-            GeyserImpl.getInstance().getLogger().error("[GeyserNetease] Failed to restart bedrock listener", e);
+        catch (Throwable t) {
+            // 版本不匹配抛的是 NoSuchMethodError / NoSuchFieldError（属于 Error，不是 Exception），
+            // 必须 catch Throwable，否则会直接冒泡打断 onPostInit。
+            String hint = versionMismatchHint();
+            GeyserImpl.getInstance().getLogger().error("[GeyserNetease] Failed to restart bedrock listener: " + t
+                + (hint.isEmpty() ? "" : System.lineSeparator() + hint));
+        }
+    }
+
+    /** 版本不匹配时给出可读的原因与解决办法；版本正常则返回空串。 */
+    private static String versionMismatchHint() {
+        try {
+            java.lang.reflect.Method m = GeyserImpl.class.getMethod("getGeyserServer");
+            String returnType = m.getReturnType().getName();
+            if (returnType.endsWith(".GeyserServer")) {
+                return "";
+            }
+            return "[GeyserNetease] 当前 Geyser 的 getGeyserServer() 返回 " + returnType
+                + "，而本扩展是按 Geyser 2.9.4 ~ 2.10.1 编译的（返回 GeyserServer）。"
+                + "请在 Geyser 2.9.4 ~ 2.10.1 上使用本 jar；"
+                + "如果必须用 Geyser 2.11.x，请改用 2.11.3 分支构建的扩展（Release v1.4.1 及更早版本）。";
+        } catch (Throwable ignored) {
+            return "";
         }
     }
 
