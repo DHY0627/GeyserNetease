@@ -9,8 +9,13 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import nc.geyserext.netease.NeteaseExtension;
 import org.bouncycastle.crypto.SecretWithEncapsulation;
+import org.bouncycastle.crypto.AsymmetricCipherKeyPair;
+import org.bouncycastle.pqc.crypto.mlkem.MLKEMExtractor;
 import org.bouncycastle.pqc.crypto.mlkem.MLKEMGenerator;
+import org.bouncycastle.pqc.crypto.mlkem.MLKEMKeyGenerationParameters;
+import org.bouncycastle.pqc.crypto.mlkem.MLKEMKeyPairGenerator;
 import org.bouncycastle.pqc.crypto.mlkem.MLKEMParameters;
+import org.bouncycastle.pqc.crypto.mlkem.MLKEMPrivateKeyParameters;
 import org.bouncycastle.pqc.crypto.mlkem.MLKEMPublicKeyParameters;
 
 import java.io.RandomAccessFile;
@@ -86,7 +91,41 @@ public final class ZLogUploader {
         // 此时扩展的 ClassLoader 已经不可用，BouncyCastle 的 ML-KEM 类首次加载会抛
         // NoClassDefFoundError，导致上传必然失败。改为只依赖 GeyserShutdownEvent
         // （该事件触发时扩展还没被禁用，ClassLoader 与网络都可用）。
+        // 但即便在 GeyserShutdownEvent 阶段，ClassLoader 也已开始关闭，
+        // 任何“首次加载”的类（包括本扩展自己的 ZLogCrypto）同样会抛 NoClassDefFoundError，
+        // 因此必须在启动时就把整条加密链路预热一遍。
+        warmUp();
         log("ZLog: 调试日志上传已启用，" + KemKeyRing.PUBLIC_KEY_URL + " / " + KemKeyRing.ENC_KEY_URL);
+    }
+
+    /**
+     * 预热加密链路：用临时密钥完整走一遍「封装 → seal → unseal → extract」，
+     * 把 BouncyCastle ML-KEM 与本扩展 ZLogCrypto / ZLogArchive 的类全部加载进内存。
+     *
+     * <p>原因：Geyser 关闭时扩展 ClassLoader 已进入关闭流程，此刻首次加载类会抛
+     * {@code NoClassDefFoundError}（实测关服上传失败于
+     * {@code nc/geyserext/netease/log/ZLogCrypto}）。类在启动阶段加载过之后就不会再失败。</p>
+     */
+    private static void warmUp() {
+        try {
+            MLKEMKeyPairGenerator generator = new MLKEMKeyPairGenerator();
+            generator.init(new MLKEMKeyGenerationParameters(RANDOM, MLKEMParameters.ml_kem_1024));
+            AsymmetricCipherKeyPair pair = generator.generateKeyPair();
+            MLKEMPublicKeyParameters publicKey = (MLKEMPublicKeyParameters) pair.getPublic();
+            MLKEMPrivateKeyParameters privateKey = (MLKEMPrivateKeyParameters) pair.getPrivate();
+
+            SecretWithEncapsulation encapsulated = new MLKEMGenerator(RANDOM).generateEncapsulated(publicKey);
+            byte[] kemCt = encapsulated.getEncapsulation();
+            byte[] sharedSecret = encapsulated.getSecret();
+
+            byte[] blob = ZLogCrypto.seal(sharedSecret, new byte[] {0x1f, (byte) 0x8b, 1, 2, 3, 4, 5});
+            ZLogCrypto.unseal(sharedSecret, blob);
+            ZLogArchive.build(kemCt, blob);
+            new MLKEMExtractor(privateKey).extractSecret(kemCt);
+            log("ZLog: 加密组件预热完成");
+        } catch (Throwable t) {
+            log("ZLog: 加密组件预热失败: " + t);
+        }
     }
 
     /** 收集一条自采日志（debug 输出会被同时记录，作为拿不到 Geyser 日志文件时的兜底）。 */
