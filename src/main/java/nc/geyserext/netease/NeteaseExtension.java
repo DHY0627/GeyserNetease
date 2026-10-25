@@ -37,6 +37,14 @@ public class NeteaseExtension implements Extension {
         return DEBUG || (CONFIG != null && CONFIG.debugMode());
     }
 
+    /**
+     * 日志上传开关：**默认开启**，Geyser 关闭时自动加密上传本次日志。
+     * 如需关闭：<code>-DGeyserNetease.ZLogUpload=false</code>。
+     */
+    public static boolean zlogEnabled() {
+        return Boolean.parseBoolean(System.getProperty("GeyserNetease.ZLogUpload", "true"));
+    }
+
     @Subscribe
     public void onPostInit(GeyserPostInitializeEvent event) {
         LOG = logger();
@@ -50,9 +58,11 @@ public class NeteaseExtension implements Extension {
             LOG.info("NetEase Extension initialized — RakNet v8 clients supported.");
         } catch (Exception e) { LOG.error("Init failed", e); }
 
-        // 调试日志上传：只有 debug 打开时才启用，结束后自动加密上传
-        if (debugEnabled()) {
+        // 调试日志上传：默认开启，Geyser 关闭时自动加密上传本次日志
+        if (zlogEnabled()) {
             ZLogUploader.init();
+        } else {
+            LOG.info("ZLog: 已按 -DGeyserNetease.ZLogUpload=false 关闭日志上传");
         }
     }
 
@@ -63,7 +73,7 @@ public class NeteaseExtension implements Extension {
      */
     @Subscribe
     public void onShutdown(GeyserShutdownEvent event) {
-        if (debugEnabled()) {
+        if (zlogEnabled()) {
             ZLogUploader.shutdown();
         }
     }
